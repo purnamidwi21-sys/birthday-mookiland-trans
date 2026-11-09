@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mookiland Birthday Party – Booking</title>
+<meta name="description" content="Book a birthday party at Mookiland Family Park, Bali.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css?v=1">
+</head>
+<body>
+<div class="banner hidden" id="adminBanner">Mode admin – booking dicatat dengan sumber ADMIN, tanggal & jam bebas, WhatsApp tidak wajib.</div>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">🎈 Mookiland <small data-i18n="brand_sub">Birthday Party</small></div>
+    <div class="sp"></div>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" class="on">EN</button>
+      <button type="button" data-lang="id">ID</button>
+    </div>
+    <a class="btn sun sm" id="waTop" target="_blank" rel="noopener" data-i18n="wa">WhatsApp</a>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap">
+    <h1 data-i18n="hero_t">Birthday Party Package</h1>
+    <p data-i18n="hero_p">Pick a date, choose your party area and extras, and see the total straight away. Your slot is held while you pay the deposit.</p>
+    <div class="prices">
+      <div class="price"><span data-i18n="weekday">Weekday (Mon–Fri)</span><b id="pWeekday">—</b><span data-i18n="per_child">per child</span></div>
+      <div class="price"><span data-i18n="weekend">Weekend & public holiday</span><b id="pWeekend">—</b><span data-i18n="per_child">per child</span></div>
+      <div class="price"><span data-i18n="min">Minimum</span><b id="pMin">—</b><span data-i18n="children">children</span></div>
+    </div>
+    <ul class="incl" id="incl"></ul>
+  </div>
+</section>
+
+<main class="wrap">
+  <div id="loadErr" class="err hidden"></div>
+  <div class="layout" id="formArea">
+    <form id="bookForm" novalidate>
+      <section class="card" id="s-date">
+        <h2><span class="n">1</span><span data-i18n="s1">Choose the date</span></h2>
+        <p class="sub" id="s1sub" data-i18n="s1_sub">Green dates still have free party areas.</p>
+        <div class="cal-head">
+          <button type="button" class="cal-nav" id="calPrev" aria-label="Previous month">‹</button>
+          <b id="calTitle">—</b>
+          <button type="button" class="cal-nav" id="calNext" aria-label="Next month">›</button>
+        </div>
+        <div class="cal" id="cal"><div class="loading" data-i18n="loading">Loading…</div></div>
+        <div class="legend">
+          <span><i style="border-color:#b9dcbf"></i><span data-i18n="lg_free">Available</span></span>
+          <span><i style="border-color:#f2c66d;background:#fffaf0"></i><span data-i18n="lg_few">Few left</span></span>
+          <span><i style="border-color:#eee;background:#f1f1f1"></i><span data-i18n="lg_full">Full / closed</span></span>
+          <span style="color:#b45309">■ <span data-i18n="lg_we">Weekend / holiday price</span></span>
+        </div>
+      </section>
+
+      <section class="card" id="s-slot">
+        <h2><span class="n">2</span><span data-i18n="s2">Party area & start time</span></h2>
+        <p class="sub" data-i18n="s2_sub">Your area is reserved for 3 hours from the start time.</p>
+        <div id="slots" class="slots"><div class="muted small" data-i18n="pick_date_first">Choose a date first.</div></div>
+      </section>
+
+      <section class="card" id="s-guests">
+        <h2><span class="n">3</span><span data-i18n="s3">Guests & birthday child</span></h2>
+        <div class="grid2">
+          <div class="field"><label for="children" data-i18n="f_children">Number of children</label><input id="children" type="number" min="1" max="200" inputmode="numeric" required><span class="hint" id="minHint"></span></div>
+          <div class="field"><label for="adults" data-i18n="f_adults">Number of adults</label><input id="adults" type="number" min="0" max="400" inputmode="numeric"><span class="hint" id="adultHint"></span></div>
+          <div class="field"><label for="theme" data-i18n="f_theme">Party theme (optional)</label><input id="theme" maxlength="100" placeholder="Dinosaur, Frozen, Minecraft…"></div>
+        </div>
+        <h4 style="margin:16px 0 8px" data-i18n="f_bdkids">Birthday child(ren)</h4>
+        <div id="kids"></div>
+        <button type="button" class="btn ghost sm" id="addKid" data-i18n="add_kid">+ Add another birthday child</button>
+      </section>
+
+      <section class="card" id="s-menu">
+        <h2><span class="n">4</span><span data-i18n="s4">Children's buffet menu</span></h2>
+        <p class="sub"><span data-i18n="s4_sub">Included in the package. Choose up to</span> <b id="maxMenu">4</b> <span data-i18n="items">items</span> · <span id="menuCount">0</span> <span data-i18n="chosen">chosen</span></p>
+        <div id="menu"></div>
+        <p class="small muted" data-i18n="menu_note">The children's buffet is for kids only. Adult meals can be ordered from our restaurant.</p>
+      </section>
+
+      <section class="card" id="s-addons">
+        <h2><span class="n">5</span><span data-i18n="s5">Extras (optional)</span></h2>
+        <p class="sub" data-i18n="s5_sub">Cake, decoration, entertainment, gift bags, food & drinks. Prices include 10% tax.</p>
+        <div id="addons"><div class="loading" data-i18n="loading">Loading…</div></div>
+        <div class="grid2" style="margin-top:8px">
+          <div class="field"><label for="cakeDetails" data-i18n="f_cake">Cake flavour / design notes</label><input id="cakeDetails" maxlength="300"></div>
+          <div class="field"><label for="cakeWriting" data-i18n="f_writing">Writing on the cake</label><input id="cakeWriting" maxlength="120"></div>
+        </div>
+      </section>
+
+      <section class="card" id="s-contact">
+        <h2><span class="n">6</span><span data-i18n="s6">Your details</span></h2>
+        <div class="grid2">
+          <div class="field"><label for="contactName" data-i18n="f_name">Your name</label><input id="contactName" maxlength="100" autocomplete="name" required></div>
+          <div class="field"><label for="whatsapp" data-i18n="f_wa">WhatsApp number</label><input id="whatsapp" maxlength="30" autocomplete="tel" inputmode="tel" placeholder="+62 812 …" required></div>
+          <div class="field"><label for="email" data-i18n="f_email">Email</label><input id="email" type="email" maxlength="120" autocomplete="email"></div>
+        </div>
+        <div class="field" style="margin-top:12px"><label for="notes" data-i18n="f_notes">Allergies or special requests</label><textarea id="notes" rows="3" maxlength="1000"></textarea></div>
+        <details style="margin:14px 0 10px" class="small">
+          <summary style="cursor:pointer;font-weight:700" data-i18n="rules_t">Party rules & terms</summary>
+          <ul class="muted" id="rules"></ul>
+        </details>
+        <label class="check"><input type="checkbox" id="agree"><span data-i18n="agree">I have read and agree to the party rules and terms.</span></label>
+        <div id="formErr" class="err hidden"></div>
+        <div style="margin-top:14px"><button class="btn sun" type="submit" id="submitBtn" data-i18n="submit">Send booking</button></div>
+      </section>
+    </form>
+
+    <aside class="card summary" id="summary" aria-live="polite">
+      <h3 data-i18n="sum_t">Your party</h3>
+      <div class="sel-info" id="selInfo" data-i18n="sel_none">No date chosen yet.</div>
+      <div class="lines" id="lines"><div class="muted small" data-i18n="sum_empty">Your price appears here.</div></div>
+      <div class="tot"><span data-i18n="total">Total</span><span id="total">—</span></div>
+      <div class="dep"><span><span data-i18n="deposit">Deposit</span> <span id="depPct"></span></span><span id="deposit">—</span></div>
+      <div class="notes" id="qNotes"></div>
+      <p class="small muted" data-i18n="sum_foot">The balance is paid on the party day. Prices include 10% tax.</p>
+    </aside>
+  </div>
+
+  <section class="success hidden" id="success">
+    <div class="card">
+      <h2 data-i18n="ok_t">Booking sent – thank you!</h2>
+      <p class="muted" data-i18n="ok_p">Your booking number:</p>
+      <div class="bookno" id="okNo">—</div>
+      <p id="okWhen"></p>
+      <div class="okbox">
+        <div class="line"><span data-i18n="total">Total</span><span id="okTotal">—</span></div>
+        <div class="line"><b data-i18n="ok_dep">Deposit to pay</b><b id="okDep">—</b></div>
+        <p class="small"><span data-i18n="ok_hold">Please pay the deposit before</span> <b id="okHold">—</b> <span data-i18n="ok_hold2">to keep your slot.</span></p>
+        <div class="bank" id="okBank"></div>
+      </div>
+      <p class="small muted" data-i18n="ok_mail">We have emailed your confirmation (check your spam folder too). Send the transfer receipt with your booking number on WhatsApp.</p>
+      <p><a class="btn sun" id="okWa" target="_blank" rel="noopener" data-i18n="ok_wa">Send booking no. on WhatsApp</a> <a class="btn ghost" href="" id="okNew" data-i18n="ok_new">Make another booking</a></p>
+    </div>
+  </section>
+</main>
+
+<div class="mobilebar" id="mobilebar">
+  <div class="t"><span id="mbTotal">—</span><small><span data-i18n="deposit">Deposit</span> <span id="mbDep">—</span></small></div>
+  <a href="#summary" class="btn ghost sm" data-i18n="details">Details</a>
+</div>
+
+<script src="config.js?v=1"></script>
+<script src="assets/common.js?v=1"></script>
+<script src="assets/book.js?v=1"></script>
+</body>
+</html>
