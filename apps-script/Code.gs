@@ -23,7 +23,9 @@ var DEFAULT_SETTINGS = [
   ['MinDaysAhead', '7', 'Booking online paling cepat H-berapa'],
   ['BankAccount', 'Account Holder: PT Entertainment Leisure Partner\nBank: BNI 46\nAccount Number: 1618996150\nSwift: BNINIDJADPS', 'Rekening untuk DP (tampil di email & layar sukses)'],
   ['SendEmails', 'TRUE', 'TRUE = kirim email konfirmasi ke klien & admin'],
-  ['BookingFormOpen', 'TRUE', 'FALSE = form booking online ditutup sementara']
+  ['BookingFormOpen', 'TRUE', 'FALSE = form booking online ditutup sementara'],
+  ['InvoiceTaxNote', 'The birthday package is not subject to tax. Prices of extras include 10% tax.', 'Catatan pajak di invoice & email klien'],
+  ['InvoiceFooter', 'Mookiland Family Park, Bali', 'Baris alamat/nama usaha di bagian atas invoice']
 ];
 
 var EXTRA_TABS = {
@@ -133,7 +135,8 @@ var ROUTES = {
   adminUpdate: function (p, token) { requireAdmin_(token); return adminUpdate_(p); },
   adminBlock: function (p, token) { requireAdmin_(token); return adminBlock_(p); },
   adminPassword: function (p, token) { requireAdmin_(token); return adminPassword_(p); },
-  adminCakePrice: function (p, token) { requireAdmin_(token); return adminCakePrice_(p); }
+  adminCakePrice: function (p, token) { requireAdmin_(token); return adminCakePrice_(p); },
+  adminInvoice: function (p, token) { requireAdmin_(token); return adminInvoice_(p); }
 };
 
 /* ------------------------------------------------------------------ sheet helpers */
@@ -610,15 +613,17 @@ function sendBookingEmails_(b, cat) {
     (b.cake ? '<br><b>Cake:</b> ' + esc_(b.cake) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') : '') + '</p>';
   var notes = b.quote.notes.length ? '<p style="font-family:Arial,sans-serif;font-size:13px;color:#555">' + b.quote.notes.map(esc_).join('<br>') + '</p>' : '';
   if (b.email) {
-    MailApp.sendEmail({
+    var mail = {
       to: b.email,
       subject: 'Your birthday booking at Mookiland – ' + b.id,
-      htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(b.contactName) + ',<br><br>Thank you for booking a birthday party at Mookiland! Here is your booking summary.</p>' +
+      htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(b.contactName) + ',<br><br>Thank you for booking a birthday party at Mookiland! Here is your booking summary. Your proforma invoice is attached.</p>' +
         info + bookingHtml_(b) + notes +
         '<p style="font-family:Arial,sans-serif;font-size:14px">Please pay the <b>' + rp_(b.quote.deposit) + '</b> deposit by <b>' + esc_(b.holdUntil.slice(0, 16)) + '</b> to secure your date. Your slot is held until then.<br><br>' +
-        esc_(cat.bank).replace(/\n/g, '<br>') + '<br><br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.<br>The balance is paid on the party day. All prices include 10% tax.</p>',
+        esc_(cat.bank).replace(/\n/g, '<br>') + '<br><br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.<br>The balance is paid on the party day. ' + esc_(taxNote_()) + '</p>',
       name: cat.business
-    });
+    };
+    mail.attachments = safeInvoice_(b.id);
+    MailApp.sendEmail(mail);
   }
   var admin = String(settings_().AdminEmail || '');
   if (admin) {
@@ -639,10 +644,100 @@ function sendCakePriceEmail_(row, oldPrice, newPrice) {
     htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(row.CustomerName) + ',<br><br>Our cake maker has reviewed your custom cake design for booking <b>' + esc_(row.BookingId) + '</b> (' + esc_(iso_(row.EventDate)) + ').<br><br>' +
       'Custom cake – final price: <b>' + rp_(newPrice) + '</b> (starting price was ' + rp_(oldPrice) + ')<br>' +
       'New booking total: <b>' + rp_(total) + '</b><br>' + (paid > 0 ? 'Already paid: ' + rp_(paid) + '<br>Balance: <b>' + rp_(total - paid) + '</b><br>' : 'Deposit: <b>' + rp_(row.DepositRequired) + '</b><br>') +
-      '<br>If you have any questions, message us on WhatsApp ' + esc_(cat.whatsapp) + '.<br>All prices include 10% tax.</p>',
-    name: cat.business
+      '<br>Your updated invoice is attached. If you have any questions, message us on WhatsApp ' + esc_(cat.whatsapp) + '.<br>' + esc_(taxNote_()) + '</p>',
+    name: cat.business,
+    attachments: safeInvoice_(row.BookingId)
   });
   return true;
+}
+
+/* ------------------------------------------------------------------ invoice */
+
+function safeInvoice_(id) {
+  try { return [invoicePdf_(id).blob]; } catch (e) { log_('system', 'INVOICE_FAILED', 'Booking', String(id), String(e)); return []; }
+}
+
+function taxNote_() {
+  var s = settings_();
+  return String(s.InvoiceTaxNote || 'The birthday package is not subject to tax. Prices of extras include 10% tax.');
+}
+
+var PAYMENT_LABELS = { DEPOSIT: 'Deposit', SECOND_PAYMENT: '2nd payment', FINAL: 'Final payment', ADJUSTMENT: 'Adjustment', REFUND: 'Refund' };
+
+// Invoice (bahasa Inggris, format mengikuti PROFORMA INVOICE di Excel lama). Nomor invoice = INV-<no. booking>.
+function invoiceHtml_(d, cat) {
+  var b = d.booking, s = settings_();
+  var number = 'INV-' + b.id;
+  var total = b.total === null ? d.items.reduce(function (t, i) { return t + i.amount; }, 0) : b.total;
+  var paid = d.payments.reduce(function (t, p) { return t + p.amount; }, 0);
+  var balance = total - paid;
+  var isPaid = total > 0 && balance <= 0;
+  var cakePending = b.cakeStatus === 'PRICE_PENDING';
+  var kids = d.participants.length ? d.participants.map(function (k) { return k.name + (k.age !== '' ? ' (' + k.age + ')' : ''); }).join(', ') : (b.child + (b.age ? ' (' + b.age + ')' : ''));
+  var area = (cat.locations.filter(function (l) { return l.id === b.locationId; })[0] || {}).name || b.venue || b.locationId || '';
+  var cell = 'padding:6px 8px;border-bottom:1px solid #e3e8e4;';
+  var kv = function (k, v) { return v === '' || v === null || v === undefined ? '' : '<tr><td style="padding:2px 12px 2px 0;color:#5d6b62;white-space:nowrap">' + esc_(k) + '</td><td style="padding:2px 0">' + esc_(v) + '</td></tr>'; };
+  var lines = d.items.length ? d.items.map(function (i) {
+    return '<tr><td style="' + cell + '">' + esc_(i.name) + (i.note ? '<br><span style="font-size:11px;color:#777">' + esc_(i.note) + '</span>' : '') + '</td>' +
+      '<td style="' + cell + 'text-align:right">' + i.qty + '</td><td style="' + cell + 'text-align:right">' + rp_(i.unitPrice) + '</td><td style="' + cell + 'text-align:right">' + rp_(i.amount) + '</td></tr>';
+  }).join('') : '<tr><td style="' + cell + '">Birthday package – ' + b.children + ' children' + (b.legacy ? '<br><span style="font-size:11px;color:#777">' + esc_(b.legacy) + '</span>' : '') + '</td><td style="' + cell + 'text-align:right">1</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td></tr>';
+  var pays = d.payments.map(function (p) {
+    return '<tr><td colspan="3" style="padding:3px 8px;text-align:right;color:#5d6b62">' + esc_(PAYMENT_LABELS[p.type] || p.type) + (p.date ? ' (' + esc_(p.date) + ')' : '') + '</td><td style="padding:3px 8px;text-align:right">' + (p.amount >= 0 ? '− ' : '+ ') + rp_(Math.abs(p.amount)) + '</td></tr>';
+  }).join('');
+  var message = isPaid ? 'This invoice has been paid in full. Thank you!' :
+    paid <= 0 ? 'To confirm your booking, please make a ' + cat.depositPercent + '% deposit of <b>' + rp_(b.deposit === null ? Math.round(total * cat.depositPercent / 100) : b.deposit) + '</b>' + (b.hold && b.status === 'PENDING' ? ' before <b>' + esc_(String(b.hold).slice(0, 16)) + '</b>' : '') + '. This deposit will be deducted from the final invoice total.' :
+    'The remaining balance of <b>' + rp_(balance) + '</b> is paid on the party day.';
+  return '<html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1d2a22;margin:28px">' +
+    '<table style="width:100%"><tr><td><div style="font-size:22px;font-weight:bold;color:#1f6b3a">Mookiland</div><div style="color:#5d6b62">' + esc_(s.InvoiceFooter || 'Mookiland Family Park, Bali') + '<br>WhatsApp ' + esc_(cat.whatsapp) + '</div></td>' +
+    '<td style="text-align:right;vertical-align:top"><div style="font-size:20px;font-weight:bold;letter-spacing:1px">' + (isPaid ? 'INVOICE' : 'PROFORMA INVOICE') + '</div>' +
+    '<div>No. <b>' + number + '</b><br>Date: ' + today_() + '</div>' + (isPaid ? '<div style="display:inline-block;margin-top:8px;border:3px solid #1f6b3a;color:#1f6b3a;font-size:22px;font-weight:bold;padding:2px 14px;transform:rotate(-6deg)">PAID</div>' : '') + '</td></tr></table>' +
+    '<hr style="border:0;border-top:2px solid #1f6b3a;margin:14px 0">' +
+    '<table style="width:100%"><tr><td style="vertical-align:top;width:50%"><div style="font-weight:bold;margin-bottom:4px">Bill to</div><table>' +
+    kv('Contact person', b.customer) + kv('Email', b.email) + kv('Phone', b.whatsapp) + kv('Birthday child', kids) + '</table></td>' +
+    '<td style="vertical-align:top"><div style="font-weight:bold;margin-bottom:4px">Event</div><table>' +
+    kv('Event', 'Birthday Package') + kv('Booking no.', b.id) + kv('Date of event', b.date) + kv('Time', b.time || b.session) + kv('Venue', area) +
+    kv('Children / adults', b.children + ' / ' + b.adults) + kv('Theme', b.theme) + '</table></td></tr></table>' +
+    '<table style="width:100%;border-collapse:collapse;margin-top:16px"><tr style="background:#e8f3ea"><th style="padding:6px 8px;text-align:left">Description</th><th style="padding:6px 8px;text-align:right">Qty</th><th style="padding:6px 8px;text-align:right">Price</th><th style="padding:6px 8px;text-align:right">Amount</th></tr>' +
+    lines +
+    '<tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold">Total' + (cakePending ? ' (estimated)' : '') + '</td><td style="padding:8px;text-align:right;font-weight:bold">' + rp_(total) + '</td></tr>' +
+    pays +
+    '<tr><td colspan="3" style="padding:6px 8px;text-align:right;font-weight:bold;border-top:1px solid #1f6b3a">Balance due</td><td style="padding:6px 8px;text-align:right;font-weight:bold;border-top:1px solid #1f6b3a">' + rp_(Math.max(0, balance)) + '</td></tr></table>' +
+    '<p style="color:#5d6b62;font-size:11px">' + esc_(taxNote_()) + (cakePending ? ' The custom cake has a starting price; we will send an updated invoice once our cake maker confirms the final price.' : '') + '</p>' +
+    (b.menu ? '<p><b>Buffet menu:</b> ' + esc_(b.menu) + '</p>' : '') +
+    (b.cakeDetails ? '<p><b>Cake:</b> ' + esc_(b.cakeDetails) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') + '</p>' : '') +
+    (b.notes ? '<p><b>Remarks:</b> ' + esc_(b.notes) + '</p>' : '') +
+    '<p style="margin-top:14px">' + message + '</p>' +
+    (isPaid ? '' : '<p>The payment can be made via bank transfer using the details below:<br>' + esc_(cat.bank).replace(/\n/g, '<br>') + '<br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.</p>') +
+    '<p style="margin-top:18px">Kind regards,<br><b>Mookiland Team</b></p></body></html>';
+}
+
+function invoicePdf_(id) {
+  var d = adminGet_(id);
+  var cat = catalog_();
+  var number = 'INV-' + d.booking.id;
+  var name = 'Mookiland ' + number + '.pdf';
+  var blob = Utilities.newBlob(invoiceHtml_(d, cat), 'text/html', number + '.html').getAs('application/pdf').setName(name);
+  return { blob: blob, name: name, number: number, booking: d.booking };
+}
+
+function adminInvoice_(p) {
+  var inv = invoicePdf_(p.id);
+  var sent = false;
+  if (p.send) {
+    var b = inv.booking, cat = catalog_();
+    if (!b.email) throw new Error('Booking ini tidak punya email klien.');
+    MailApp.sendEmail({
+      to: b.email,
+      subject: 'Invoice ' + inv.number + ' – Mookiland Birthday',
+      htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(b.customer) + ',<br><br>Please find attached the latest invoice for your birthday party at Mookiland on <b>' + esc_(b.date) + '</b> (booking ' + esc_(b.id) + ').<br><br>' +
+        'If you have any questions, message us on WhatsApp ' + esc_(cat.whatsapp) + '.<br><br>Kind regards,<br>Mookiland Team</p>',
+      name: cat.business,
+      attachments: [inv.blob]
+    });
+    sent = true;
+    log_('admin', 'INVOICE_SENT', 'Booking', b.id, inv.number + ' to ' + b.email);
+  }
+  return { number: inv.number, fileName: inv.name, sent: sent, pdf: Utilities.base64Encode(inv.blob.getBytes()) };
 }
 
 /* ------------------------------------------------------------------ admin */

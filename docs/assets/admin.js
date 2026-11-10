@@ -160,6 +160,10 @@
       '<button class="btn ghost sm" type="submit">Simpan</button></form>' +
       '<div class="field" style="margin-top:8px"><label>Catatan / permintaan khusus</label><textarea id="editNotes" rows="2">' + esc(b.notes) + '</textarea></div>';
 
+    h += '<div class="sec">Invoice</div><div class="actions" style="margin-top:0">' +
+      '<button type="button" class="btn ghost sm" id="invDl">Unduh invoice (PDF)</button>' +
+      '<button type="button" class="btn sm" id="invSend"' + (b.email ? '' : ' disabled title="Tidak ada email klien"') + '>Kirim invoice ke klien</button>' +
+      '<span class="small muted" id="invMsg">' + (b.payment === 'PAID' ? 'Invoice akan bercap PAID.' : 'Proforma invoice dengan pembayaran terbaru.') + '</span></div>';
     h += '<div class="actions">' + (wa ? '<a class="btn sun sm" target="_blank" rel="noopener" href="' + esc(wa) + '">WhatsApp klien</a>' : '') +
       (b.status === 'PENDING' ? '<button type="button" class="btn ghost sm" data-hold="1">Perpanjang masa tahan 3 hari</button>' : '') +
       (b.status !== 'COMPLETED' ? '<button type="button" class="btn ghost sm" data-status="COMPLETED">Tandai selesai</button>' : '') +
@@ -184,6 +188,24 @@
         if (r.mailed) { const m = document.createElement('div'); m.className = 'okbox small'; m.textContent = 'Harga cake disimpan dan email terkirim ke klien.'; $('#dlgBody').prepend(m); }
       } catch (e) { err(e.message); btn.disabled = false; }
     });
+    const invoice = async (send, btn) => {
+      const msg = $('#invMsg'); btn.disabled = true; msg.textContent = send ? 'Mengirim invoice…' : 'Membuat PDF…';
+      try {
+        const r = await call('adminInvoice', { id: b.id, send });
+        if (send) { msg.textContent = 'Invoice ' + r.number + ' terkirim ke ' + b.email + '.'; refreshRow(); }
+        else {
+          const bin = atob(r.pdf); const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+          const a = document.createElement('a'); a.href = url; a.download = r.fileName; document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          msg.textContent = r.fileName + ' diunduh.';
+        }
+      } catch (e) { msg.textContent = ''; err(e.message); }
+      btn.disabled = !b.email && send;
+    };
+    $('#invDl').addEventListener('click', (ev) => invoice(false, ev.currentTarget));
+    $('#invSend').addEventListener('click', (ev) => { if (confirm('Kirim invoice terbaru ke ' + b.email + '?')) invoice(true, ev.currentTarget); });
     $('#editForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
       try { after(await call('adminUpdate', { id: b.id, fields: { total: f.get('total'), deposit: f.get('deposit'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value } })); } catch (e) { err(e.message); }

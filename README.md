@@ -79,3 +79,18 @@ be filled in each year.
 - Deposit = `DepositPercent` × total.
 - A `PENDING` booking stops holding its slot after `HoldExpiresAt` if no
   payment has been made. Admins can extend the hold from the detail screen.
+
+## Invoice
+- **Proforma invoice:** when a client books, the confirmation email includes the proforma invoice as a PDF attachment.
+  - The invoice is in English and follows the old Excel PROFORMA INVOICE layout.
+  - The invoice number is `INV-<booking no.>`.
+- **Admin page:** the booking detail has two buttons, **Unduh invoice (PDF)** and **Kirim invoice ke klien**. Both always use the latest data:
+  - payments (deposit, 2nd payment, final payment);
+  - the final custom cake price;
+  - changes to the total.
+- **After full payment:** the invoice title becomes INVOICE and it carries a PAID stamp.
+- **Updated cake price:** the email sent with a new cake price includes the updated invoice.
+- **Settings (`Settings` tab):**
+  - `InvoiceTaxNote` is the tax note. The default text is: "The birthday package is not subject to tax. Prices of extras include 10% tax."
+  - `InvoiceFooter` is the line under the Mookiland name.
+  - Bank details come from `BankAccount`.
