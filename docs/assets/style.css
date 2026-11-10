@@ -17,6 +17,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .top .wrap { display: flex; align-items: center; gap: 12px; min-height: 58px; }
 .brand { font-weight: 900; font-size: 19px; letter-spacing: .3px; display: flex; align-items: center; gap: 8px; }
 .brand small { font-weight: 600; opacity: .8; font-size: 13px; }
+.brand .logo { height: 46px; width: auto; display: block; }
 .top .sp { flex: 1; }
 .lang { display: inline-flex; border: 1px solid rgba(255,255,255,.5); border-radius: 999px; overflow: hidden; }
 .lang button { background: none; border: 0; color: #fff; padding: 4px 10px; cursor: pointer; font-weight: 700; font-size: 13px; }
