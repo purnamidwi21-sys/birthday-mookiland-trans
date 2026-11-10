@@ -5,6 +5,9 @@
   const ST = { PENDING: 'Menunggu DP', CONFIRMED: 'Terkonfirmasi', COMPLETED: 'Selesai', CANCELLED: 'Batal' };
   const PS = { UNPAID: 'Belum bayar', DEPOSIT_PAID: 'DP masuk', PAID: 'Lunas', NO_PAYMENT_RECORD: 'Tidak tercatat' };
   const SES = { Morning: 'Pagi', Afternoon: 'Siang/sore' };
+  PS.NOT_REQUIRED = 'Tanpa tagihan';
+  const EV = { BIRTHDAY_PACKAGE: 'Birthday Package', BIRTHDAY_REGULAR_TICKET: 'Regular Ticket', SCHOOL_EXCURSION: 'School excursion', GROUP_EVENT: 'Group event', PRIVATE_EVENT: 'Private event', UNKNOWN: 'Belum diketahui' };
+  const evBadge = (c) => '<span class="badge ev ev-' + (c === 'BIRTHDAY_PACKAGE' ? 'pkg' : c === 'BIRTHDAY_REGULAR_TICKET' ? 'reg' : 'oth') + '">' + esc(c === 'BIRTHDAY_PACKAGE' ? 'Package' : c === 'BIRTHDAY_REGULAR_TICKET' ? 'Regular' : (EV[c] || c || '—')) + '</span>';
   const PT = { DEPOSIT: 'DP', SECOND_PAYMENT: 'Pembayaran ke-2', FINAL: 'Pelunasan', ADJUSTMENT: 'Koreksi', REFUND: 'Refund', OTHER_BANK: 'Bank lain' };
   let token = null;
   try { token = localStorage.getItem('mk_admin_token'); } catch (e) { token = null; }
@@ -69,6 +72,9 @@
     if (S.view === 'past') rows = rows.filter((b) => b.date < S.today);
     if (S.view === 'cake') rows = rows.filter((b) => b.cakeStatus === 'PRICE_PENDING' && b.status !== 'CANCELLED').slice().reverse();
     if (y) rows = rows.filter((b) => b.date.slice(0, 4) === y);
+    const ft = $('#fType').value;
+    if (ft === 'OTHER') rows = rows.filter((b) => b.category !== 'BIRTHDAY_PACKAGE' && b.category !== 'BIRTHDAY_REGULAR_TICKET');
+    else if (ft) rows = rows.filter((b) => b.category === ft);
     if (q) rows = rows.filter((b) => [b.id, b.customer, b.child, b.whatsapp, b.venue].join(' ').toLowerCase().includes(q));
     return rows;
   }
@@ -81,7 +87,7 @@
       const loc = (S.cat && S.cat.locations.find((l) => l.id === b.locationId)) || null;
       const st = expired(b) ? '<span class="badge b-exp">Masa tahan habis</span>' : '<span class="badge b-' + esc(b.status) + '">' + esc(ST[b.status] || b.status) + '</span>';
       return '<tr data-id="' + esc(b.id) + '"><td>' + esc(dateLabel(b.date, 'id')) + '<div class="sub">' + esc(SES[b.session] || b.session) + ' ' + esc(b.time) + '</div></td>' +
-        '<td>' + esc(loc ? loc.name : (b.venue || '—')) + '</td><td>' + esc(b.id) + (b.source === 'LEGACY_GOOGLE_FORM' ? ' <span class="sub">lama</span>' : '') + '</td>' +
+        '<td>' + esc(loc ? loc.name : (b.venue || '—')) + '</td><td>' + esc(b.id) + (b.source === 'LEGACY_GOOGLE_FORM' ? ' <span class="sub">lama</span>' : '') + '<div>' + evBadge(b.category) + '</div></td>' +
         '<td>' + esc(b.customer || '—') + '<div class="sub">' + esc(b.child) + '</div></td><td class="n">' + esc(b.children || '') + '</td>' +
         '<td class="n">' + (b.total == null ? '<span class="sub">—</span>' : esc(rp(b.total))) + '</td><td class="n">' + esc(rp(b.paid || 0)) + '</td>' +
         '<td class="st">' + st + '<br><span class="badge b-' + esc(b.payment) + '">' + esc(PS[b.payment] || b.payment) + '</span>' +
@@ -93,6 +99,7 @@
   $$('#viewSeg button').forEach((b) => b.addEventListener('click', () => { $$('#viewSeg button').forEach((x) => x.classList.toggle('on', x === b)); S.view = b.dataset.v; renderList(); }));
   $('#q').addEventListener('input', renderList);
   $('#fYear').addEventListener('change', renderList);
+  $('#fType').addEventListener('change', renderList);
   $('#btnReload').addEventListener('click', load);
 
   // ---------------- detail ----------------
@@ -111,7 +118,7 @@
     const balance = b.total == null ? null : b.total - (b.paid || 0);
     const wa = b.whatsapp ? waLink(b.whatsapp, 'Halo ' + b.customer + ', ini Mookiland mengenai booking ulang tahun ' + b.id + '.') : '';
     const kv = (k, v) => '<div><span>' + esc(k) + '</span>' + esc(v || '—') + '</div>';
-    let h = '<div class="info">' + kv('Tanggal', dateLabel(b.date, 'id')) + kv('Sesi / jam', (SES[b.session] || b.session) + ' ' + b.time) + kv('Area', loc ? loc.name : b.venue) +
+    let h = '<div class="info">' + kv('Jenis event', EV[b.category] || b.eventType || b.category) + kv('Tanggal', dateLabel(b.date, 'id')) + kv('Sesi / jam', (SES[b.session] || b.session) + ' ' + b.time) + kv('Area', loc ? loc.name : b.venue) +
       kv('Status', (ST[b.status] || b.status) + ' · ' + (PS[b.payment] || b.payment)) + kv('Klien', b.customer) + kv('WhatsApp', b.whatsapp) + kv('Email', b.email) +
       kv('Anak berulang tahun', b.child + (b.age ? ' (' + b.age + ')' : '')) + kv('Anak / dewasa', b.children + ' / ' + (b.adults || '—')) + kv('Tema', b.theme) +
       kv('Dibuat', b.createdAt + ' · ' + b.source) + kv('Masa tahan slot', b.status === 'PENDING' ? b.hold : '') + '</div>';
@@ -153,7 +160,10 @@
       '<div class="field"><label>Bank / cara</label><select name="method"><option>BNI transfer</option><option>Bank lain</option><option>QRIS</option><option>Kartu</option><option>Tunai</option></select></div>' +
       '<button class="btn sm" type="submit">Catat pembayaran</button></form>';
 
+    const evOpts = ['BIRTHDAY_PACKAGE', 'BIRTHDAY_REGULAR_TICKET'];
     h += '<div class="sec">Ubah booking</div><form id="editForm" class="formrow">' +
+      '<div class="field"><label>Jenis event</label><select name="category">' + (evOpts.includes(b.category) ? '' : '<option value="" selected>' + esc(EV[b.category] || b.category || '—') + '</option>') +
+      evOpts.map((c) => '<option value="' + c + '"' + (b.category === c ? ' selected' : '') + '>' + EV[c] + '</option>').join('') + '</select></div>' +
       '<div class="field"><label>Total tagihan (Rp)</label><input name="total" type="number" step="1000" value="' + (b.total == null ? '' : esc(b.total)) + '"></div>' +
       '<div class="field"><label>DP (Rp)</label><input name="deposit" type="number" step="1000" value="' + (b.deposit == null ? '' : esc(b.deposit)) + '"></div>' +
       '<div class="field"><label>Jumlah anak</label><input name="children" type="number" min="0" value="' + esc(b.children || '') + '"></div>' +
@@ -209,7 +219,12 @@
     $('#invSend').addEventListener('click', (ev) => { if (confirm('Kirim invoice terbaru ke ' + b.email + '?')) invoice(true, ev.currentTarget); });
     $('#editForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
-      try { after(await call('adminUpdate', { id: b.id, fields: { total: f.get('total'), deposit: f.get('deposit'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value } })); } catch (e) { err(e.message); }
+      const fields = { total: f.get('total'), deposit: f.get('deposit'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value };
+      if (f.get('category') && f.get('category') !== b.category) {
+        if (!confirm('Ubah jenis event menjadi ' + EV[f.get('category')] + '? Total tagihan tidak dihitung ulang otomatis; sesuaikan Total & DP bila perlu.')) return;
+        fields.category = f.get('category');
+      }
+      try { after(await call('adminUpdate', { id: b.id, fields })); } catch (e) { err(e.message); }
     });
     $$('[data-status]').forEach((btn) => btn.addEventListener('click', async () => {
       const st = btn.dataset.status;
@@ -228,7 +243,7 @@
   function refreshRow() {
     const b = S.current && S.current.booking; if (!b) return;
     const i = S.list.findIndex((x) => x.id === b.id);
-    if (i >= 0) Object.assign(S.list[i], { total: b.total, paid: b.paid, status: b.status, payment: b.payment, children: b.children, hold: b.hold, cakeStatus: b.cakeStatus });
+    if (i >= 0) Object.assign(S.list[i], { category: b.category, total: b.total, paid: b.paid, status: b.status, payment: b.payment, children: b.children, hold: b.hold, cakeStatus: b.cakeStatus });
     renderStats(); renderList();
   }
 

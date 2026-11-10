@@ -105,7 +105,7 @@
   let token = null;
   try { token = params.has('admin') ? localStorage.getItem('mk_admin_token') : null; } catch (e) { token = null; }
   const S = { cat: null, month: null, days: {}, date: null, avail: null, locationId: null, session: null, time: null, items: {}, menu: [], kids: [{ name: '', dob: '', age: '' }], quote: null,
-    cake: { type: 'layered', flavor: '', filling: '', finishing: '', notes: '' }, cakePhoto: null, cakeShown: false };
+    cake: { type: 'layered', flavor: '', filling: '', finishing: '', notes: '' }, cakePhoto: null, cakeShown: false, eventCategory: 'BIRTHDAY_PACKAGE' };
 
   // ---------------- language ----------------
   function applyLang() {
@@ -119,7 +119,7 @@
 
   // ---------------- load ----------------
   async function init() {
-    if (token) $('#adminBanner').classList.remove('hidden');
+    if (token) { $('#adminBanner').classList.remove('hidden'); $('#s-type').classList.remove('hidden'); }
     applyLang();
     try {
       S.cat = await api('catalog');
@@ -272,6 +272,20 @@
   $('#addKid').addEventListener('click', () => { if (S.kids.length < 4) { S.kids.push({ name: '', dob: '', age: '' }); renderKids(); } });
 
   // ---------------- buffet menu ----------------
+  // jenis event (hanya mode admin): Birthday Package atau Regular Ticket
+  const EV_SUB = { BIRTHDAY_PACKAGE: 'Paket birthday: harga per anak (minimum anak berlaku) + menu buffet anak.',
+    BIRTHDAY_REGULAR_TICKET: 'Regular Ticket: tamu bayar tiket masuk reguler di gerbang. Tidak ada harga paket, minimum anak, atau menu buffet; yang ditagih hanya biaya area & extra.' };
+  $$('#evType .chip').forEach((c) => c.addEventListener('click', () => {
+    S.eventCategory = c.dataset.ev;
+    $$('#evType .chip').forEach((x) => x.classList.toggle('sel', x === c));
+    $('#evTypeSub').textContent = EV_SUB[S.eventCategory];
+    const regular = S.eventCategory === 'BIRTHDAY_REGULAR_TICKET';
+    $('#s-menu').classList.toggle('hidden', regular);
+    if (regular) S.menu = [];
+    if (S.cat) renderMenu();
+    requestQuote();
+  }));
+
   function renderMenu() {
     const box = $('#menu');
     box.replaceChildren();
@@ -430,7 +444,7 @@
       birthdayChildren: S.kids.map((k) => ({ name: k.name.trim(), dob: k.dob, age: k.age })),
       theme: $('#theme').value, cakeDetails: $('#cakeDetails').value, cakeWriting: $('#cakeWriting').value,
       contactName: $('#contactName').value, whatsapp: $('#whatsapp').value, email: $('#email').value, notes: $('#notes').value,
-      agree: $('#agree').checked, lang,
+      agree: $('#agree').checked, lang, eventCategory: token ? S.eventCategory : undefined,
       customCake: customOn() ? Object.assign({}, S.cake) : undefined,
       cakePhoto: withPhoto && customOn() && S.cakePhoto ? { name: S.cakePhoto.name, mime: S.cakePhoto.mime, data: S.cakePhoto.data } : undefined
     };

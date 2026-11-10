@@ -35,6 +35,15 @@ var EXTRA_TABS = {
   CakeOptions: ['Group', 'Name', 'Active']
 };
 
+// Jenis event yang bisa dipilih admin (EventCategory -> label EventType)
+var EVENT_TYPES = { BIRTHDAY_PACKAGE: 'Birthday Package', BIRTHDAY_REGULAR_TICKET: 'Regular Ticket' };
+function eventLabel_(cat, type) {
+  if (cat === 'BIRTHDAY_PACKAGE') return 'Birthday Package';
+  if (cat === 'BIRTHDAY_REGULAR_TICKET') return 'Regular Ticket';
+  return String(type || cat || '');
+}
+function isRegular_(p, admin) { return !!admin && String(p.eventCategory || '') === 'BIRTHDAY_REGULAR_TICKET'; }
+
 // Kolom tambahan di tab Bookings (ditambahkan otomatis oleh setup)
 var BOOKING_EXTRA_COLS = ['CakeStatus', 'CakeReferenceUrl'];
 
@@ -419,10 +428,14 @@ function quote_(p, cat, admin) {
   var weekend = isWeekend_(date, cat);
   var children = Math.max(0, Math.floor(num_(p.children)));
   if (children < 1) throw new Error('Isi jumlah anak.');
-  var billedKids = Math.max(children, cat.minChildren);
-  var unit = weekend ? cat.weekendPrice : cat.weekdayPrice;
+  var regular = isRegular_(p, admin);
+  var billedKids = regular ? children : Math.max(children, cat.minChildren);
+  var unit = regular ? 0 : weekend ? cat.weekendPrice : cat.weekdayPrice;
   var lines = [];
-  lines.push({ type: 'package', id: cat.packageId, name: cat.packageName + (weekend ? ' (weekend / holiday)' : ' (weekday)'),
+  if (regular) {
+    lines.push({ type: 'package', id: 'REGULAR-TICKET', name: 'Birthday with regular tickets', qty: children, unit: 'per child', unitPrice: 0, amount: 0,
+      note: 'Guests pay the regular entrance ticket at the gate' });
+  } else lines.push({ type: 'package', id: cat.packageId, name: cat.packageName + (weekend ? ' (weekend / holiday)' : ' (weekday)'),
     qty: billedKids, unit: 'per child', unitPrice: unit, amount: unit * billedKids,
     note: children < cat.minChildren ? 'Minimum charge ' + cat.minChildren + ' children' : '' });
   var loc = null;
@@ -454,7 +467,8 @@ function quote_(p, cat, admin) {
     lines.push(line);
   });
   var adults = Math.max(0, Math.floor(num_(p.adults)));
-  if (adults > children * cat.adultsPerChild) notes.push((adults - children * cat.adultsPerChild) + ' extra adult(s) pay the regular entrance at the park');
+  if (regular) notes.push('Regular ticket booking: every guest pays the regular entrance ticket at the gate; only the extras above are billed by us.');
+  else if (adults > children * cat.adultsPerChild) notes.push((adults - children * cat.adultsPerChild) + ' extra adult(s) pay the regular entrance at the park');
   var packageAmount = lines[0].amount;
   var venueFee = lines.filter(function (l) { return l.type === 'venue'; }).reduce(function (s, l) { return s + l.amount; }, 0);
   var addOnsTotal = lines.filter(function (l) { return l.type === 'addon' && !l.restaurant; }).reduce(function (s, l) { return s + l.amount; }, 0);
@@ -464,7 +478,7 @@ function quote_(p, cat, admin) {
   var deposit = Math.round(total * cat.depositPercent / 100);
   return { date: date, weekend: weekend, children: children, billedKids: billedKids, unitPrice: unit, lines: lines,
     packageAmount: packageAmount, venueFee: venueFee, addOnsTotal: addOnsTotal, restaurantTotal: restaurantTotal, total: total, deposit: deposit,
-    depositPercent: cat.depositPercent, notes: notes,
+    depositPercent: cat.depositPercent, notes: notes, eventCategory: regular ? 'BIRTHDAY_REGULAR_TICKET' : 'BIRTHDAY_PACKAGE',
     estimate: lines.some(function (l) { return l.startingPrice; }),
     customCake: lines.some(function (l) { return l.id === cat.customCakeId; }) };
 }
@@ -510,7 +524,7 @@ function createBooking_(p, admin) {
   var kids = (p.birthdayChildren || []).map(function (c) { return { name: clean_(c.name, 80), age: c.age === '' || c.age === undefined ? '' : Math.floor(num_(c.age)), dob: iso_(c.dob) }; })
     .filter(function (c) { return c.name; }).slice(0, 4);
   if (!kids.length) throw new Error('Isi nama anak yang berulang tahun.');
-  var menuIds = (p.menu || []).slice(0, 20);
+  var menuIds = isRegular_(p, admin) ? [] : (p.menu || []).slice(0, 20); // buffet hanya untuk Birthday Package
   if (menuIds.length > cat.maxBuffet) throw new Error('Maksimal ' + cat.maxBuffet + ' menu buffet.');
   var menuNames = menuIds.map(function (id) { var m = cat.menu.filter(function (x) { return x.id === id; })[0]; if (!m) throw new Error('Menu tidak tersedia: ' + id); return m.name; });
   if (!admin && !p.agree) throw new Error('Please agree to the rules and terms.');
@@ -550,9 +564,9 @@ function createBooking_(p, admin) {
       BirthdayAge: kids.map(function (k) { return k.age; }).filter(function (a) { return a !== ''; }).join(' & '),
       EventDate: txt_(date), Session: session, LocationId: p.locationId, ChildrenCount: q.children,
       PackageUnitPrice: q.unitPrice, VenueFee: q.venueFee, AddOnsTotal: q.addOnsTotal, BookingTotal: q.total, DepositRequired: q.deposit,
-      BookingStatus: 'PENDING', HoldExpiresAt: txt_(hold), PaymentStatus: 'UNPAID',
+      BookingStatus: q.total > 0 ? 'PENDING' : 'CONFIRMED', HoldExpiresAt: q.total > 0 ? txt_(hold) : '', PaymentStatus: q.total > 0 ? 'UNPAID' : 'NOT_REQUIRED',
       SpecialRequest: clean_(p.notes, 1000), Source: admin ? 'ADMIN' : 'WEBSITE',
-      CustomerId: custId, EventCategory: 'BIRTHDAY_PACKAGE', EventType: 'Birthday Package', EventTime: txt_(time),
+      CustomerId: custId, EventCategory: q.eventCategory, EventType: EVENT_TYPES[q.eventCategory], EventTime: txt_(time),
       VenueLegacy: loc ? loc.name : '', AdultsCount: Math.floor(num_(p.adults)) || '', ChildrenPlanned: q.children,
       Theme: clean_(p.theme, 100), BirthdayCake: cakeSummary,
       CakeDetails: cake ? cake.text + (clean_(p.cakeDetails, 300) ? ' · ' + clean_(p.cakeDetails, 300) : '') : clean_(p.cakeDetails, 300),
@@ -586,7 +600,7 @@ function createBooking_(p, admin) {
     } catch (e) { log_('system', 'CAKE_PHOTO_FAILED', 'Booking', id, String(e)); }
   }
   var booking = { id: id, date: date, session: session, time: time, location: loc ? loc.name : '', contactName: name, email: email, whatsapp: wa,
-    children: q.children, adults: Math.floor(num_(p.adults)) || 0, kids: kids, menu: menuNames, quote: q, holdUntil: hold, bank: cat.bank, contact: cat.whatsapp,
+    children: q.children, adults: Math.floor(num_(p.adults)) || 0, kids: kids, menu: menuNames, quote: q, holdUntil: q.total > 0 ? hold : '', eventCategory: q.eventCategory, bank: cat.bank, contact: cat.whatsapp,
     cake: cake ? cake.text : '', cakeWriting: clean_(p.cakeWriting, 120), cakePhoto: photoUrl, cakePhotoSent: !!(p.cakePhoto && p.cakePhoto.data) };
   try { sendBookingEmails_(booking, cat); } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', id, String(e)); }
   return booking;
@@ -631,9 +645,9 @@ function bookingHtml_(b) {
 
 function sendBookingEmails_(b, cat) {
   if (!bool_(settings_().SendEmails === undefined ? 'TRUE' : settings_().SendEmails)) return;
-  var info = '<p style="font-family:Arial,sans-serif;font-size:14px"><b>Booking no.:</b> ' + esc_(b.id) + '<br><b>Date:</b> ' + esc_(b.date) + ' · ' + esc_(b.session) + ' ' + esc_(b.time) +
+  var info = '<p style="font-family:Arial,sans-serif;font-size:14px"><b>Booking no.:</b> ' + esc_(b.id) + '<br><b>Event:</b> ' + esc_(eventLabel_(b.eventCategory)) + '<br><b>Date:</b> ' + esc_(b.date) + ' · ' + esc_(b.session) + ' ' + esc_(b.time) +
     '<br><b>Area:</b> ' + esc_(b.location) + '<br><b>Birthday child:</b> ' + esc_(b.kids.map(function (k) { return k.name + (k.age !== '' ? ' (' + k.age + ')' : ''); }).join(', ')) +
-    '<br><b>Children / adults:</b> ' + b.children + ' / ' + b.adults + '<br><b>Buffet menu:</b> ' + esc_(b.menu.join(', ')) +
+    '<br><b>Children / adults:</b> ' + b.children + ' / ' + b.adults + (b.menu.length ? '<br><b>Buffet menu:</b> ' + esc_(b.menu.join(', ')) : '') +
     (b.cake ? '<br><b>Cake:</b> ' + esc_(b.cake) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') : '') + '</p>';
   var notes = b.quote.notes.length ? '<p style="font-family:Arial,sans-serif;font-size:13px;color:#555">' + b.quote.notes.map(esc_).join('<br>') + '</p>' : '';
   if (b.email) {
@@ -642,8 +656,9 @@ function sendBookingEmails_(b, cat) {
       subject: 'Your birthday booking at Mookiland – ' + b.id,
       htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(b.contactName) + ',<br><br>Thank you for booking a birthday party at Mookiland! Here is your booking summary. Your proforma invoice is attached.</p>' +
         info + bookingHtml_(b) + notes +
-        '<p style="font-family:Arial,sans-serif;font-size:14px">Please pay the <b>' + rp_(b.quote.deposit) + '</b> deposit by <b>' + esc_(b.holdUntil.slice(0, 16)) + '</b> to secure your date. Your slot is held until then.<br><br>' +
-        esc_(cat.bank).replace(/\n/g, '<br>') + '<br><br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.<br>The balance is paid on the party day. ' + esc_(taxNote_()) + '</p>',
+        (b.quote.total > 0 ? '<p style="font-family:Arial,sans-serif;font-size:14px">Please pay the <b>' + rp_(b.quote.deposit) + '</b> deposit by <b>' + esc_(b.holdUntil.slice(0, 16)) + '</b> to secure your date. Your slot is held until then.<br><br>' +
+        esc_(cat.bank).replace(/\n/g, '<br>') + '<br><br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.<br>The balance is paid on the party day. ' + esc_(taxNote_()) + '</p>' :
+        '<p style="font-family:Arial,sans-serif;font-size:14px">Your booking is confirmed. No deposit is needed: every guest pays the regular entrance ticket at the gate on the party day.<br><br>If you have any questions, message us on WhatsApp ' + esc_(cat.whatsapp) + '.</p>'),
       name: cat.business
     };
     mail.attachments = safeInvoice_(b.id);
@@ -653,7 +668,7 @@ function sendBookingEmails_(b, cat) {
   if (admin) {
     var cakeAdmin = b.cake ? '<p style="font-family:Arial,sans-serif;font-size:14px;background:#fff7e6;padding:8px"><b>Cake custom – harga belum final.</b> Kirim detail ke cake maker, lalu isi harga final di halaman admin.' +
       (b.cakePhoto ? '<br>Foto referensi: <a href="' + esc_(b.cakePhoto) + '">' + esc_(b.cakePhoto) + '</a>' : b.cakePhotoSent ? '<br>Foto referensi gagal disimpan – minta lewat WhatsApp.' : '<br>Klien tidak mengunggah foto referensi.') + '</p>' : '';
-    MailApp.sendEmail({ to: admin, subject: 'Booking baru ' + b.id + ' – ' + b.date + ' ' + b.session + (b.cake ? ' (cake custom)' : ''), htmlBody: '<p style="font-family:Arial,sans-serif">Kontak: ' + esc_(b.contactName) + ' · ' + esc_(b.whatsapp) + ' · ' + esc_(b.email) + '</p>' + info + cakeAdmin + bookingHtml_(b) + notes, name: cat.business });
+    MailApp.sendEmail({ to: admin, subject: 'Booking baru ' + b.id + ' – ' + b.date + ' ' + b.session + (b.eventCategory === 'BIRTHDAY_REGULAR_TICKET' ? ' (Regular Ticket)' : '') + (b.cake ? ' (cake custom)' : ''), htmlBody: '<p style="font-family:Arial,sans-serif">Kontak: ' + esc_(b.contactName) + ' · ' + esc_(b.whatsapp) + ' · ' + esc_(b.email) + '</p>' + info + cakeAdmin + bookingHtml_(b) + notes, name: cat.business });
   }
 }
 
@@ -698,6 +713,7 @@ function invoiceHtml_(d, cat) {
   var paid = d.payments.reduce(function (t, p) { return t + p.amount; }, 0);
   var balance = total - paid;
   var isPaid = total > 0 && balance <= 0;
+  var noCharge = b.total !== null && total <= 0 && paid <= 0;
   var cakePending = b.cakeStatus === 'PRICE_PENDING';
   var kids = d.participants.length ? d.participants.map(function (k) { return k.name + (k.age !== '' ? ' (' + k.age + ')' : ''); }).join(', ') : (b.child + (b.age ? ' (' + b.age + ')' : ''));
   var area = (cat.locations.filter(function (l) { return l.id === b.locationId; })[0] || {}).name || b.venue || b.locationId || '';
@@ -711,7 +727,8 @@ function invoiceHtml_(d, cat) {
   var pays = d.payments.map(function (p) {
     return '<tr><td colspan="3" style="padding:3px 8px;text-align:right;color:#5d6b62">' + esc_(PAYMENT_LABELS[p.type] || p.type) + (p.date ? ' (' + esc_(p.date) + ')' : '') + '</td><td style="padding:3px 8px;text-align:right">' + (p.amount >= 0 ? '− ' : '+ ') + rp_(Math.abs(p.amount)) + '</td></tr>';
   }).join('');
-  var message = isPaid ? 'This invoice has been paid in full. Thank you!' :
+  var message = noCharge ? 'No payment is due for this booking. Every guest pays the regular entrance ticket at the gate on the party day.' :
+    isPaid ? 'This invoice has been paid in full. Thank you!' :
     paid <= 0 ? 'To confirm your booking, please make a ' + cat.depositPercent + '% deposit of <b>' + rp_(b.deposit === null ? Math.round(total * cat.depositPercent / 100) : b.deposit) + '</b>' + (b.hold && b.status === 'PENDING' ? ' before <b>' + esc_(String(b.hold).slice(0, 16)) + '</b>' : '') + '. This deposit will be deducted from the final invoice total.' :
     'The remaining balance of <b>' + rp_(balance) + '</b> is paid on the party day.';
   return '<html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1d2a22;margin:28px">' +
@@ -722,7 +739,7 @@ function invoiceHtml_(d, cat) {
     '<table style="width:100%"><tr><td style="vertical-align:top;width:50%"><div style="font-weight:bold;margin-bottom:4px">Bill to</div><table>' +
     kv('Contact person', b.customer) + kv('Email', b.email) + kv('Phone', b.whatsapp) + kv('Birthday child', kids) + '</table></td>' +
     '<td style="vertical-align:top"><div style="font-weight:bold;margin-bottom:4px">Event</div><table>' +
-    kv('Event', 'Birthday Package') + kv('Booking no.', b.id) + kv('Date of event', b.date) + kv('Time', b.time || b.session) + kv('Venue', area) +
+    kv('Event', eventLabel_(b.category, b.eventType) || 'Birthday Package') + kv('Booking no.', b.id) + kv('Date of event', b.date) + kv('Time', b.time || b.session) + kv('Venue', area) +
     kv('Children / adults', b.children + ' / ' + b.adults) + kv('Theme', b.theme) + '</table></td></tr></table>' +
     '<table style="width:100%;border-collapse:collapse;margin-top:16px"><tr style="background:#e8f3ea"><th style="padding:6px 8px;text-align:left">Description</th><th style="padding:6px 8px;text-align:right">Qty</th><th style="padding:6px 8px;text-align:right">Price</th><th style="padding:6px 8px;text-align:right">Amount</th></tr>' +
     lines +
@@ -739,7 +756,7 @@ function invoiceHtml_(d, cat) {
     (b.cakeDetails ? '<p><b>Cake:</b> ' + esc_(b.cakeDetails) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') + '</p>' : '') +
     (b.notes ? '<p><b>Remarks:</b> ' + esc_(b.notes) + '</p>' : '') +
     '<p style="margin-top:14px">' + message + '</p>' +
-    (isPaid ? '' : '<p>The payment can be made via bank transfer using the details below:<br>' + esc_(cat.bank).replace(/\n/g, '<br>') + '<br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.</p>') +
+    (isPaid || noCharge ? '' : '<p>The payment can be made via bank transfer using the details below:<br>' + esc_(cat.bank).replace(/\n/g, '<br>') + '<br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.</p>') +
     '<p style="margin-top:18px">Kind regards,<br><b>Mookiland Team</b></p></body></html>';
 }
 
@@ -799,7 +816,7 @@ function bookingOut_(b) {
     whatsapp: String(b.WhatsApp || '').replace(/^'/, ''), child: String(b.BirthdayChild || ''), age: String(b.BirthdayAge || ''),
     children: num_(b.ChildrenCount), adults: num_(b.AdultsCount), total: b.BookingTotal === '' ? null : num_(b.BookingTotal),
     deposit: b.DepositRequired === '' ? null : num_(b.DepositRequired), paid: num_(b.TotalPaid), status: String(b.BookingStatus || ''),
-    payment: String(b.PaymentStatus || ''), hold: stamp_(b.HoldExpiresAt), source: String(b.Source || ''), category: String(b.EventCategory || ''),
+    payment: String(b.PaymentStatus || ''), hold: stamp_(b.HoldExpiresAt), source: String(b.Source || ''), category: String(b.EventCategory || ''), eventType: String(b.EventType || ''),
     theme: String(b.Theme || ''), notes: String(b.SpecialRequest || ''), cake: String(b.BirthdayCake || ''), cakeDetails: String(b.CakeDetails || ''),
     cakeWriting: String(b.CakeWriting || ''), decoration: String(b.Decoration || ''), entertainment: String(b.Entertainment || ''),
     menu: String(b.BuffetMenu || ''), extraFood: String(b.ExtraFoodBeverage || ''), legacy: String(b.LegacySummary || ''),
@@ -846,9 +863,10 @@ function recompute_(id) {
   var paid = table_(TAB.PAYMENTS).rows.filter(function (r) { return String(r.BookingId) === String(id); })
     .reduce(function (s, r) { return s + num_(r.Amount); }, 0);
   var total = b.BookingTotal === '' ? 0 : num_(b.BookingTotal);
-  var ps = paid <= 0 ? (iso_(b.EventDate) < today_() ? 'NO_PAYMENT_RECORD' : 'UNPAID') : (total > 0 && paid >= total ? 'PAID' : 'DEPOSIT_PAID');
+  var noCharge = b.BookingTotal !== '' && total <= 0 && paid <= 0;
+  var ps = noCharge ? 'NOT_REQUIRED' : paid <= 0 ? (iso_(b.EventDate) < today_() ? 'NO_PAYMENT_RECORD' : 'UNPAID') : (total > 0 && paid >= total ? 'PAID' : 'DEPOSIT_PAID');
   var st = String(b.BookingStatus || '');
-  if (st !== 'CANCELLED' && st !== 'COMPLETED') st = paid > 0 ? 'CONFIRMED' : 'PENDING';
+  if (st !== 'CANCELLED' && st !== 'COMPLETED') st = paid > 0 || noCharge ? 'CONFIRMED' : 'PENDING';
   setFields_(TAB.BOOKINGS, b._row, { TotalPaid: paid, PaymentStatus: ps, BookingStatus: st, UpdatedAt: txt_(now_()) });
   return { paid: paid, payment: ps, status: st };
 }
@@ -895,6 +913,11 @@ function adminUpdate_(p) {
   if (f.adults !== undefined) out.AdultsCount = Math.floor(num_(f.adults));
   if (f.theme !== undefined) out.Theme = clean_(f.theme, 100);
   if (f.hold !== undefined) out.HoldExpiresAt = txt_(clean_(f.hold, 19));
+  if (f.category !== undefined && f.category !== String(b.EventCategory || '')) {
+    if (!EVENT_TYPES[f.category]) throw new Error('Jenis event tidak dikenal.');
+    out.EventCategory = f.category;
+    out.EventType = EVENT_TYPES[f.category];
+  }
   out.UpdatedAt = txt_(now_());
   setFields_(TAB.BOOKINGS, b._row, out);
   var r = recompute_(b.BookingId);

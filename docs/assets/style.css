@@ -180,3 +180,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .resto-tot { font-weight: 600; }
 .resto-note { margin: 8px 14px 4px; font-size: 12px; color: var(--muted); }
 .tag-resto { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; font-size: 11px; background: #fff3d6; color: #7a5600; vertical-align: 1px; }
+
+.evtype { display: flex; flex-wrap: wrap; gap: 8px; }
+.evtype .chip { padding: 8px 16px; font-size: 14px; }

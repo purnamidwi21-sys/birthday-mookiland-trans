@@ -104,3 +104,13 @@ Add-on dengan kategori di setting **RestaurantCategories** (default: `Food & Bev
 - di tab BookingItems, kolom **Billing** berisi `RESTAURANT` atau `INVOICE`. Kolom ini ditambahkan otomatis saat `setup` dijalankan.
 
 Untuk mengubah kategori yang dibayar di restoran, edit nilai RestaurantCategories di tab Settings (pisahkan dengan koma).
+
+## Jenis event: Birthday Package atau Regular Ticket
+
+- **Halaman admin:** setiap booking diberi label jenis event (Package / Regular / lainnya). Ada filter "Semua jenis event", dan di detail booking ada pilihan **Jenis event** di bagian "Ubah booking". Saat jenis event diubah, total tagihan tidak dihitung ulang otomatis.
+- **Booking baru dari admin** (`index.html?admin=1`): pilih jenis event di bagian atas form.
+  - **Birthday Package:** harga per anak, minimum anak, dan menu buffet berlaku seperti biasa.
+  - **Regular Ticket:** tamu membayar tiket masuk reguler di gerbang. Yang ditagih hanya biaya area dan extra. Tidak ada harga paket, minimum anak, atau menu buffet.
+  - Jika total Regular Ticket Rp 0, booking langsung **Terkonfirmasi** dengan status bayar "Tanpa tagihan". Booking seperti ini tidak punya masa tahan slot dan emailnya tidak meminta DP.
+- **Form online untuk klien** tetap hanya untuk Birthday Package.
+- **Laporan** tetap menghitung Option #2 (Birthday Package) saja.
