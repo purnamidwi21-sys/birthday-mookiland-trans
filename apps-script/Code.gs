@@ -25,11 +25,12 @@ var DEFAULT_SETTINGS = [
   ['SendEmails', 'TRUE', 'TRUE = kirim email konfirmasi ke klien & admin'],
   ['BookingFormOpen', 'TRUE', 'FALSE = form booking online ditutup sementara'],
   ['InvoiceTaxNote', 'The birthday package is not subject to tax. Prices of extras include 10% tax.', 'Catatan pajak di invoice & email klien'],
-  ['InvoiceFooter', 'Mookiland Family Park, Bali', 'Baris alamat/nama usaha di bagian atas invoice']
+  ['InvoiceFooter', 'Mookiland Family Park, Bali', 'Baris alamat/nama usaha di bagian atas invoice'],
+  ['RestaurantCategories', 'Food & Beverage, Food & Beverage (Adults)', 'Kategori add-on yang dipesan & dibayar di restoran (penjualan biasa): tampil sebagai info, tidak masuk invoice/total/DP']
 ];
 
 var EXTRA_TABS = {
-  BookingItems: ['ItemId', 'BookingId', 'AddOnId', 'Category', 'Name', 'Qty', 'Unit', 'UnitPrice', 'Amount', 'Note'],
+  BookingItems: ['ItemId', 'BookingId', 'AddOnId', 'Category', 'Name', 'Qty', 'Unit', 'UnitPrice', 'Amount', 'Note', 'Billing'],
   Holidays: ['Date', 'Name'],
   CakeOptions: ['Group', 'Name', 'Active']
 };
@@ -69,6 +70,11 @@ function setup() {
       sh = ss.insertSheet(name);
       sh.getRange(1, 1, 1, EXTRA_TABS[name].length).setValues([EXTRA_TABS[name]]);
       sh.setFrozenRows(1);
+    } else {
+      var h = head_(sh);
+      EXTRA_TABS[name].forEach(function (c) {
+        if (h.indexOf(c) < 0) { sh.getRange(1, h.length + 1).setValue(c); h.push(c); }
+      });
     }
   });
   var hol = ss.getSheetByName(TAB.HOLIDAYS);
@@ -224,8 +230,11 @@ function catalog_() {
   var locations = table_(TAB.LOCATIONS).rows.filter(function (r) { return bool_(r.Active); }).map(function (r) {
     return { id: String(r.LocationId), name: String(r.Name), weekdayFee: num_(r.WeekdayFee), weekendFee: num_(r.WeekendFee), capacity: r.Capacity === '' ? null : num_(r.Capacity) };
   });
+  var restoCats = restaurantCats_(s);
   var addons = table_(TAB.ADDONS).rows.filter(function (r) { return r.AddOnId && bool_(r.Active); }).map(function (r) {
-    return { id: String(r.AddOnId), category: String(r.Category), name: String(r.Name), description: String(r.Description || ''), unit: String(r.Unit || ''), price: num_(r.Price) };
+    var a = { id: String(r.AddOnId), category: String(r.Category), name: String(r.Name), description: String(r.Description || ''), unit: String(r.Unit || ''), price: num_(r.Price) };
+    if (restoCats.indexOf(a.category.trim().toLowerCase()) >= 0) a.restaurant = true;
+    return a;
   });
   var menu = [];
   try {
@@ -262,6 +271,12 @@ function catalog_() {
     customCakeId: customCake ? customCake.id : '', cakeOptions: cakeOptions_(),
     today: today_()
   };
+}
+
+// Kategori add-on yang dibayar di restoran (Settings: RestaurantCategories, dipisah koma).
+function restaurantCats_(s) {
+  var v = s.RestaurantCategories === undefined ? 'Food & Beverage, Food & Beverage (Adults)' : String(s.RestaurantCategories);
+  return v.split(',').map(function (x) { return x.trim().toLowerCase(); }).filter(String);
 }
 
 function cakeOptions_() {
@@ -427,7 +442,10 @@ function quote_(p, cat, admin) {
     if (qty < 1) return;
     if (qty > 500) throw new Error('Jumlah terlalu besar: ' + a.name);
     var line = { type: 'addon', id: a.id, category: a.category, name: a.name, qty: qty, unit: a.unit, unitPrice: a.price, amount: a.price * qty, note: String(it.note || '').slice(0, 200) };
-    if (a.price === 0) line.note = (line.note ? line.note + ' · ' : '') + 'price per menu, billed at the restaurant';
+    if (a.restaurant) {
+      line.restaurant = true;
+      line.note = (line.note ? line.note + ' · ' : '') + 'Ordered & paid at the restaurant';
+    } else if (a.price === 0) line.note = (line.note ? line.note + ' · ' : '') + 'price per menu, billed at the restaurant';
     if (a.id === cat.customCakeId) {
       line.startingPrice = true;
       line.note = 'Starting price · final price confirmed by our cake maker';
@@ -439,11 +457,13 @@ function quote_(p, cat, admin) {
   if (adults > children * cat.adultsPerChild) notes.push((adults - children * cat.adultsPerChild) + ' extra adult(s) pay the regular entrance at the park');
   var packageAmount = lines[0].amount;
   var venueFee = lines.filter(function (l) { return l.type === 'venue'; }).reduce(function (s, l) { return s + l.amount; }, 0);
-  var addOnsTotal = lines.filter(function (l) { return l.type === 'addon'; }).reduce(function (s, l) { return s + l.amount; }, 0);
+  var addOnsTotal = lines.filter(function (l) { return l.type === 'addon' && !l.restaurant; }).reduce(function (s, l) { return s + l.amount; }, 0);
+  var restaurantTotal = lines.filter(function (l) { return l.restaurant; }).reduce(function (s, l) { return s + l.amount; }, 0);
+  if (restaurantTotal > 0) notes.push('Food & beverage extras are ordered and paid at the restaurant (regular restaurant sale), so they are not part of the booking total or deposit.');
   var total = packageAmount + venueFee + addOnsTotal;
   var deposit = Math.round(total * cat.depositPercent / 100);
   return { date: date, weekend: weekend, children: children, billedKids: billedKids, unitPrice: unit, lines: lines,
-    packageAmount: packageAmount, venueFee: venueFee, addOnsTotal: addOnsTotal, total: total, deposit: deposit,
+    packageAmount: packageAmount, venueFee: venueFee, addOnsTotal: addOnsTotal, restaurantTotal: restaurantTotal, total: total, deposit: deposit,
     depositPercent: cat.depositPercent, notes: notes,
     estimate: lines.some(function (l) { return l.startingPrice; }),
     customCake: lines.some(function (l) { return l.id === cat.customCakeId; }) };
@@ -545,7 +565,7 @@ function createBooking_(p, admin) {
     var seq = itemsTable.rows.length;
     q.lines.forEach(function (l) {
       seq++;
-      append_(TAB.ITEMS, { ItemId: 'IT-' + ('00000' + seq).slice(-6), BookingId: id, AddOnId: l.id, Category: l.category || l.type, Name: l.name, Qty: l.qty, Unit: l.unit, UnitPrice: l.unitPrice, Amount: l.amount, Note: l.note || '' });
+      append_(TAB.ITEMS, { ItemId: 'IT-' + ('00000' + seq).slice(-6), BookingId: id, AddOnId: l.id, Category: l.category || l.type, Name: l.name, Qty: l.qty, Unit: l.unit, UnitPrice: l.unitPrice, Amount: l.amount, Note: l.note || '', Billing: l.restaurant ? 'RESTAURANT' : 'INVOICE' });
     });
     var pt = table_(TAB.PARTICIPANTS);
     var pn = pt.rows.length;
@@ -596,13 +616,17 @@ function esc_(s) { return String(s === undefined || s === null ? '' : s).replace
 
 function bookingHtml_(b) {
   var q = b.quote;
-  var rows = q.lines.map(function (l) {
+  var row = function (l) {
     return '<tr><td style="padding:4px 8px">' + esc_(l.name) + (l.note ? '<br><small style="color:#777">' + esc_(l.note) + '</small>' : '') +
       '</td><td style="padding:4px 8px;text-align:right">' + l.qty + '</td><td style="padding:4px 8px;text-align:right">' + rp_(l.amount) + '</td></tr>';
-  }).join('');
-  return '<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">' + rows +
+  };
+  var resto = q.lines.filter(function (l) { return l.restaurant; });
+  var restoHtml = resto.length ? '<tr><td colspan="3" style="padding:12px 8px 4px"><b>At the restaurant (for information)</b><br><small style="color:#777">Ordered and paid separately at the restaurant · not included in the total above</small></td></tr>' +
+    resto.map(row).join('') +
+    '<tr><td style="padding:4px 8px;color:#555">Estimated restaurant bill</td><td></td><td style="padding:4px 8px;text-align:right;color:#555">' + rp_(q.restaurantTotal) + '</td></tr>' : '';
+  return '<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">' + q.lines.filter(function (l) { return !l.restaurant; }).map(row).join('') +
     '<tr><td style="padding:6px 8px;border-top:1px solid #ccc"><b>' + (q.estimate ? 'Estimated total' : 'Total') + '</b></td><td></td><td style="padding:6px 8px;border-top:1px solid #ccc;text-align:right"><b>' + rp_(q.total) + '</b></td></tr>' +
-    '<tr><td style="padding:4px 8px">Deposit (' + q.depositPercent + '%)</td><td></td><td style="padding:4px 8px;text-align:right">' + rp_(q.deposit) + '</td></tr></table>';
+    '<tr><td style="padding:4px 8px">Deposit (' + q.depositPercent + '%)</td><td></td><td style="padding:4px 8px;text-align:right">' + rp_(q.deposit) + '</td></tr>' + restoHtml + '</table>';
 }
 
 function sendBookingEmails_(b, cat) {
@@ -668,7 +692,9 @@ var PAYMENT_LABELS = { DEPOSIT: 'Deposit', SECOND_PAYMENT: '2nd payment', FINAL:
 function invoiceHtml_(d, cat) {
   var b = d.booking, s = settings_();
   var number = 'INV-' + b.id;
-  var total = b.total === null ? d.items.reduce(function (t, i) { return t + i.amount; }, 0) : b.total;
+  var resto = d.items.filter(function (i) { return i.billing === 'RESTAURANT'; });
+  var billed = d.items.filter(function (i) { return i.billing !== 'RESTAURANT'; });
+  var total = b.total === null ? billed.reduce(function (t, i) { return t + i.amount; }, 0) : b.total;
   var paid = d.payments.reduce(function (t, p) { return t + p.amount; }, 0);
   var balance = total - paid;
   var isPaid = total > 0 && balance <= 0;
@@ -677,10 +703,11 @@ function invoiceHtml_(d, cat) {
   var area = (cat.locations.filter(function (l) { return l.id === b.locationId; })[0] || {}).name || b.venue || b.locationId || '';
   var cell = 'padding:6px 8px;border-bottom:1px solid #e3e8e4;';
   var kv = function (k, v) { return v === '' || v === null || v === undefined ? '' : '<tr><td style="padding:2px 12px 2px 0;color:#5d6b62;white-space:nowrap">' + esc_(k) + '</td><td style="padding:2px 0">' + esc_(v) + '</td></tr>'; };
-  var lines = d.items.length ? d.items.map(function (i) {
+  var itemRow = function (i) {
     return '<tr><td style="' + cell + '">' + esc_(i.name) + (i.note ? '<br><span style="font-size:11px;color:#777">' + esc_(i.note) + '</span>' : '') + '</td>' +
       '<td style="' + cell + 'text-align:right">' + i.qty + '</td><td style="' + cell + 'text-align:right">' + rp_(i.unitPrice) + '</td><td style="' + cell + 'text-align:right">' + rp_(i.amount) + '</td></tr>';
-  }).join('') : '<tr><td style="' + cell + '">Birthday package – ' + b.children + ' children' + (b.legacy ? '<br><span style="font-size:11px;color:#777">' + esc_(b.legacy) + '</span>' : '') + '</td><td style="' + cell + 'text-align:right">1</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td></tr>';
+  };
+  var lines = billed.length ? billed.map(itemRow).join('') : '<tr><td style="' + cell + '">Birthday package – ' + b.children + ' children' + (b.legacy ? '<br><span style="font-size:11px;color:#777">' + esc_(b.legacy) + '</span>' : '') + '</td><td style="' + cell + 'text-align:right">1</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td></tr>';
   var pays = d.payments.map(function (p) {
     return '<tr><td colspan="3" style="padding:3px 8px;text-align:right;color:#5d6b62">' + esc_(PAYMENT_LABELS[p.type] || p.type) + (p.date ? ' (' + esc_(p.date) + ')' : '') + '</td><td style="padding:3px 8px;text-align:right">' + (p.amount >= 0 ? '− ' : '+ ') + rp_(Math.abs(p.amount)) + '</td></tr>';
   }).join('');
@@ -702,6 +729,11 @@ function invoiceHtml_(d, cat) {
     '<tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold">Total' + (cakePending ? ' (estimated)' : '') + '</td><td style="padding:8px;text-align:right;font-weight:bold">' + rp_(total) + '</td></tr>' +
     pays +
     '<tr><td colspan="3" style="padding:6px 8px;text-align:right;font-weight:bold;border-top:1px solid #1f6b3a">Balance due</td><td style="padding:6px 8px;text-align:right;font-weight:bold;border-top:1px solid #1f6b3a">' + rp_(Math.max(0, balance)) + '</td></tr></table>' +
+    (resto.length ? '<div style="margin-top:16px;border:1px dashed #b9c4bc;padding:8px 10px;background:#fafbf9">' +
+      '<div style="font-weight:bold">At the restaurant – for information only</div>' +
+      '<div style="font-size:11px;color:#5d6b62;margin-bottom:6px">These items are ordered and paid separately at the Mookiland restaurant. They are not part of this invoice, the deposit or the balance due.</div>' +
+      '<table style="width:100%;border-collapse:collapse;color:#3c4a41">' + resto.map(itemRow).join('') +
+      '<tr><td colspan="3" style="padding:6px 8px;text-align:right">Estimated restaurant bill</td><td style="padding:6px 8px;text-align:right">' + rp_(resto.reduce(function (t, i) { return t + i.amount; }, 0)) + '</td></tr></table></div>' : '') +
     '<p style="color:#5d6b62;font-size:11px">' + esc_(taxNote_()) + (cakePending ? ' The custom cake has a starting price; we will send an updated invoice once our cake maker confirms the final price.' : '') + '</p>' +
     (b.menu ? '<p><b>Buffet menu:</b> ' + esc_(b.menu) + '</p>' : '') +
     (b.cakeDetails ? '<p><b>Cake:</b> ' + esc_(b.cakeDetails) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') + '</p>' : '') +
@@ -795,7 +827,7 @@ function adminGet_(id) {
   var b = findBooking_(id);
   var items = [];
   try { items = table_(TAB.ITEMS).rows.filter(function (r) { return String(r.BookingId) === String(id); }).map(function (r) {
-    return { id: String(r.ItemId), addOnId: String(r.AddOnId), category: String(r.Category), name: String(r.Name), qty: num_(r.Qty), unit: String(r.Unit), unitPrice: num_(r.UnitPrice), amount: num_(r.Amount), note: String(r.Note || '') };
+    return { id: String(r.ItemId), addOnId: String(r.AddOnId), category: String(r.Category), name: String(r.Name), qty: num_(r.Qty), unit: String(r.Unit), unitPrice: num_(r.UnitPrice), amount: num_(r.Amount), note: String(r.Note || ''), billing: String(r.Billing || 'INVOICE') };
   }); } catch (e) { items = []; }
   var payments = table_(TAB.PAYMENTS).rows.filter(function (r) { return String(r.BookingId) === String(id); }).map(function (r) {
     return { id: String(r.PaymentId), type: String(r.PaymentType), amount: num_(r.Amount), date: iso_(r.TransferDate), bank: String(r.Bank || ''), status: String(r.VerificationStatus || ''), by: String(r.VerifiedBy || ''), at: stamp_(r.VerifiedAt) };

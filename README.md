@@ -94,3 +94,13 @@ be filled in each year.
   - `InvoiceTaxNote` is the tax note. The default text is: "The birthday package is not subject to tax. Prices of extras include 10% tax."
   - `InvoiceFooter` is the line under the Mookiland name.
   - Bank details come from `BankAccount`.
+
+## Extra makanan & minuman (dibayar di restoran)
+
+Add-on dengan kategori di setting **RestaurantCategories** (default: `Food & Beverage, Food & Beverage (Adults)`, misalnya cold beer) dicatat sebagai **info saja**:
+
+- tetap tampil di form booking, email, invoice, dan halaman admin (bagian "At the restaurant");
+- **tidak** masuk total booking, DP, sisa bayar, atau tabel tagihan invoice. Item ini dipesan dan dibayar di restoran sebagai penjualan biasa;
+- di tab BookingItems, kolom **Billing** berisi `RESTAURANT` atau `INVOICE`. Kolom ini ditambahkan otomatis saat `setup` dijalankan.
+
+Untuk mengubah kategori yang dibayar di restoran, edit nilai RestaurantCategories di tab Settings (pisahkan dengan koma).

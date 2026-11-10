@@ -38,7 +38,7 @@
       cc_photo: 'Design reference photo', cc_photo_hint: 'Help us understand your vision for the perfect birthday cake by uploading a reference photo.',
       cc_notes: 'Design notes (colours, characters, a different flavour per tier…)', cc_remove_photo: 'Remove photo', cc_reading: 'Preparing photo…',
       err_cake_flavor: 'Please choose the flavour of your custom cake.', err_photo: 'Please choose an image file (JPG or PNG).',
-      total_est: 'Estimated total', ok_cake: 'Your custom cake has a starting price. We will send you the final price once our cake maker has reviewed your design.',
+      total_est: 'Estimated total', resto_t: 'At the restaurant (paid separately)', resto_sub: 'For information · ordered and paid at the restaurant, not included in the total or deposit.', resto_est: 'Estimated restaurant bill', resto_cat: 'Paid at the restaurant – not included in the booking total.', resto_tag: 'Paid at restaurant', ok_cake: 'Your custom cake has a starting price. We will send you the final price once our cake maker has reviewed your design.',
       rules: [
         'Decorations, animations and the children’s food menu are only available through our Birthday Party Package.',
         'Outside food and beverages are not allowed. Outside cakes have an extra charge.',
@@ -83,7 +83,7 @@
       cc_photo: 'Foto referensi desain', cc_photo_hint: 'Bantu kami memahami kue ulang tahun impian Anda dengan mengunggah foto referensi.',
       cc_notes: 'Catatan desain (warna, karakter, rasa berbeda per tingkat…)', cc_remove_photo: 'Hapus foto', cc_reading: 'Menyiapkan foto…',
       err_cake_flavor: 'Pilih rasa kue custom.', err_photo: 'Pilih file gambar (JPG atau PNG).',
-      total_est: 'Estimasi total', ok_cake: 'Kue custom Anda memakai harga mulai. Harga final akan kami kirimkan setelah cake maker kami melihat desain Anda.',
+      total_est: 'Estimasi total', resto_t: 'Di restoran (dibayar terpisah)', resto_sub: 'Sebagai info · dipesan dan dibayar di restoran, tidak termasuk total atau DP.', resto_est: 'Estimasi tagihan restoran', resto_cat: 'Dibayar di restoran – tidak termasuk total booking.', resto_tag: 'Bayar di restoran', ok_cake: 'Kue custom Anda memakai harga mulai. Harga final akan kami kirimkan setelah cake maker kami melihat desain Anda.',
       rules: [
         'Dekorasi, hiburan dan menu makanan anak hanya tersedia melalui Paket Pesta Ulang Tahun kami.',
         'Makanan dan minuman dari luar tidak diperbolehkan. Kue dari luar dikenakan biaya tambahan.',
@@ -317,13 +317,14 @@
       if (openCats.has(c)) det.open = true;
       const n = cats[c].filter((a) => S.items[a.id]).length;
       det.innerHTML = '<summary>' + esc(c) + (n ? ' <span class="cnt">' + n + '</span>' : '') + '</summary>';
+      if (cats[c].every((a) => a.restaurant)) det.insertAdjacentHTML('beforeend', '<div class="resto-note">' + esc(t('resto_cat')) + '</div>');
       const list = document.createElement('div'); list.className = 'items';
       cats[c].forEach((a) => {
         const q = S.items[a.id] || 0;
         const it = document.createElement('div'); it.className = 'item' + (q ? ' on' : '');
         const unit = a.unit ? ' ' + a.unit : '';
         it.innerHTML = '<div><b>' + esc(a.name) + '</b>' + (a.description ? '<div class="d">' + esc(a.description) + '</div>' : '') +
-          '<div class="p">' + (a.price ? esc(rp(a.price)) + esc(unit) + (/starting/i.test(a.description) ? ' · ' + esc(t('starting')) : '') : '') + '</div></div>';
+          '<div class="p">' + (a.price ? esc(rp(a.price)) + esc(unit) + (/starting/i.test(a.description) ? ' · ' + esc(t('starting')) : '') : '') + (a.restaurant ? ' <span class="tag-resto">' + esc(t('resto_tag')) + '</span>' : '') + '</div></div>';
         const ctl = document.createElement('div');
         if (!q) {
           const b = document.createElement('button'); b.type = 'button'; b.className = 'btn ghost sm'; b.textContent = t('add');
@@ -455,15 +456,30 @@
       $('#totalLabel').textContent = t('total');
       $('#total').textContent = '—'; $('#deposit').textContent = '—'; $('#depPct').textContent = ''; $('#qNotes').textContent = '';
       $('#mbTotal').textContent = '—'; $('#mbDep').textContent = '—';
+      $('#resto').hidden = true; $('#resto').replaceChildren();
       return;
     }
-    lines.replaceChildren(...q.lines.map((l) => {
+    const lineEl = (l) => {
       const d = document.createElement('div'); d.className = 'line';
       const a = document.createElement('span'); a.textContent = l.name + (l.qty > 1 ? ' × ' + l.qty : '');
-      if (l.note) { const s = document.createElement('small'); s.textContent = l.note; a.appendChild(s); }
+      const note = l.restaurant ? String(l.note || '').replace(/( · )?Ordered & paid at the restaurant/, '') : l.note;
+      if (note) { const s = document.createElement('small'); s.textContent = note; a.appendChild(s); }
       const b = document.createElement('span'); b.textContent = rp(l.amount);
       d.append(a, b); return d;
-    }));
+    };
+    lines.replaceChildren(...q.lines.filter((l) => !l.restaurant).map(lineEl));
+    const rl = q.lines.filter((l) => l.restaurant);
+    const resto = $('#resto');
+    resto.hidden = !rl.length;
+    if (rl.length) {
+      const h = document.createElement('div'); h.className = 'resto-h'; h.textContent = t('resto_t');
+      const sub = document.createElement('small'); sub.textContent = t('resto_sub'); h.appendChild(sub);
+      const tot = document.createElement('div'); tot.className = 'line resto-tot';
+      const ta = document.createElement('span'); ta.textContent = t('resto_est');
+      const tb = document.createElement('span'); tb.textContent = rp(q.restaurantTotal || rl.reduce((s, l) => s + l.amount, 0));
+      tot.append(ta, tb);
+      resto.replaceChildren(h, ...rl.map(lineEl), tot);
+    } else resto.replaceChildren();
     $('#totalLabel').textContent = q.estimate ? t('total_est') : t('total');
     $('#total').textContent = rp(q.total); $('#deposit').textContent = rp(q.deposit); $('#depPct').textContent = '(' + q.depositPercent + '%)';
     $('#qNotes').textContent = q.notes.join(' · ');

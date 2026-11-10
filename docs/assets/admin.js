@@ -120,7 +120,8 @@
       '<div><span>Sudah dibayar</span><b>' + esc(rp(b.paid || 0)) + '</b></div><div><span>Sisa</span><b>' + (balance == null ? '—' : esc(rp(balance))) + '</b></div></div>';
     if (d.items.length) {
       h += '<div class="sec">Rincian</div><div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga</th><th class="n">Jumlah</th></tr></thead><tbody>' +
-        d.items.map((i) => '<tr style="cursor:default"><td>' + esc(i.name) + (i.note ? '<div class="sub">' + esc(i.note) + '</div>' : '') + '</td><td class="n">' + i.qty + '</td><td class="n">' + esc(rp(i.unitPrice)) + '</td><td class="n">' + esc(rp(i.amount)) + '</td></tr>').join('') + '</tbody></table></div>';
+        d.items.map((i) => '<tr style="cursor:default' + (i.billing === 'RESTAURANT' ? ';color:var(--muted)' : '') + '"><td>' + esc(i.name) + (i.billing === 'RESTAURANT' ? ' <span class="badge b-resto">Resto</span>' : '') + (i.note ? '<div class="sub">' + esc(i.note) + '</div>' : '') + '</td><td class="n">' + i.qty + '</td><td class="n">' + esc(rp(i.unitPrice)) + '</td><td class="n">' + (i.billing === 'RESTAURANT' ? '<span title="Dibayar di restoran, tidak masuk total">(' + esc(rp(i.amount)) + ')</span>' : esc(rp(i.amount))) + '</td></tr>').join('') + '</tbody></table></div>';
+      if (d.items.some((i) => i.billing === 'RESTAURANT')) h += '<div class="small muted" style="margin-top:4px">Item <b>Resto</b> = dipesan & dibayar di restoran (penjualan biasa). Hanya info, tidak masuk total, DP, atau invoice.</div>';
     }
     const extra = [['Menu buffet', b.menu], ['Kue', [b.cake, b.cakeDetails, b.cakeWriting && '“' + b.cakeWriting + '”'].filter(Boolean).join(' · ')], ['Dekorasi', b.decoration], ['Hiburan & lainnya', b.entertainment], ['Makanan & minuman tambahan', b.extraFood]].filter((x) => x[1]);
     if (extra.length) h += '<div class="info" style="margin-top:12px">' + extra.map((x) => kv(x[0], x[1])).join('') + '</div>';

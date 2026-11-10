@@ -54,3 +54,5 @@
 .cakebox-a { border: 1.5px solid #f2c66d; background: #fffaf0; border-radius: 12px; padding: 12px 14px; margin-top: 12px; }
 .cakebox-a .formrow { margin-top: 10px; }
 .cakebox-a .ok { color: var(--green); font-weight: 800; }
+
+.b-resto { background: #fff3d6; color: #7a5600; }
