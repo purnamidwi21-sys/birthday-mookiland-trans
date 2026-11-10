@@ -32,6 +32,13 @@
       err_agree: 'Please tick the box to agree to the rules.', sending: 'Sending…', closed_form: 'Online booking is closed at the moment. Please contact us on WhatsApp.',
       soon: 'Online booking opens {n} days ahead. For an earlier date, message us on WhatsApp.', wa_msg: 'Hi Bu Dwi, here is my birthday booking: {id}',
       remove: 'Remove', starting: 'starting price', unit_suffix: '',
+      cc_t: 'Your custom cake', cc_lead: 'Tell us what you would like. The price shown is a starting price: our cake maker confirms the final price after reviewing your design.',
+      cc_layered: 'Layered cake', cc_plain: 'Non layered cake', cc_flavor: 'Cake flavour', cc_filling: 'Filling (between the layers)',
+      cc_finishing: 'Finishing', cc_finish_hint: 'If you choose a design, the cover will follow the design.', cc_choose: 'Choose…', cc_ask: 'Not sure yet – ask the cake maker',
+      cc_photo: 'Design reference photo', cc_photo_hint: 'Help us understand your vision for the perfect birthday cake by uploading a reference photo.',
+      cc_notes: 'Design notes (colours, characters, a different flavour per tier…)', cc_remove_photo: 'Remove photo', cc_reading: 'Preparing photo…',
+      err_cake_flavor: 'Please choose the flavour of your custom cake.', err_photo: 'Please choose an image file (JPG or PNG).',
+      total_est: 'Estimated total', ok_cake: 'Your custom cake has a starting price. We will send you the final price once our cake maker has reviewed your design.',
       rules: [
         'Decorations, animations and the children’s food menu are only available through our Birthday Party Package.',
         'Outside food and beverages are not allowed. Outside cakes have an extra charge.',
@@ -70,6 +77,13 @@
       err_agree: 'Centang kotak persetujuan aturan.', sending: 'Mengirim…', closed_form: 'Booking online sedang ditutup. Silakan hubungi kami lewat WhatsApp.',
       soon: 'Booking online paling cepat {n} hari sebelumnya. Untuk tanggal lebih dekat, hubungi kami lewat WhatsApp.', wa_msg: 'Halo Bu Dwi, ini booking ulang tahun saya: {id}',
       remove: 'Hapus', starting: 'harga mulai', unit_suffix: '',
+      cc_t: 'Detail kue custom', cc_lead: 'Ceritakan kue yang Anda inginkan. Harga yang tampil adalah harga mulai: cake maker kami mengonfirmasi harga final setelah melihat desain Anda.',
+      cc_layered: 'Kue berlapis', cc_plain: 'Kue tanpa lapisan', cc_flavor: 'Rasa kue', cc_filling: 'Isian (di antara lapisan)',
+      cc_finishing: 'Tampilan kue', cc_finish_hint: 'Jika desain sudah dipilih, cover akan mengikuti desain tersebut.', cc_choose: 'Pilih…', cc_ask: 'Belum tahu – tanya cake maker',
+      cc_photo: 'Foto referensi desain', cc_photo_hint: 'Bantu kami memahami kue ulang tahun impian Anda dengan mengunggah foto referensi.',
+      cc_notes: 'Catatan desain (warna, karakter, rasa berbeda per tingkat…)', cc_remove_photo: 'Hapus foto', cc_reading: 'Menyiapkan foto…',
+      err_cake_flavor: 'Pilih rasa kue custom.', err_photo: 'Pilih file gambar (JPG atau PNG).',
+      total_est: 'Estimasi total', ok_cake: 'Kue custom Anda memakai harga mulai. Harga final akan kami kirimkan setelah cake maker kami melihat desain Anda.',
       rules: [
         'Dekorasi, hiburan dan menu makanan anak hanya tersedia melalui Paket Pesta Ulang Tahun kami.',
         'Makanan dan minuman dari luar tidak diperbolehkan. Kue dari luar dikenakan biaya tambahan.',
@@ -90,7 +104,8 @@
   const params = new URLSearchParams(location.search);
   let token = null;
   try { token = params.has('admin') ? localStorage.getItem('mk_admin_token') : null; } catch (e) { token = null; }
-  const S = { cat: null, month: null, days: {}, date: null, avail: null, locationId: null, session: null, time: null, items: {}, menu: [], kids: [{ name: '', dob: '', age: '' }], quote: null };
+  const S = { cat: null, month: null, days: {}, date: null, avail: null, locationId: null, session: null, time: null, items: {}, menu: [], kids: [{ name: '', dob: '', age: '' }], quote: null,
+    cake: { type: 'layered', flavor: '', filling: '', finishing: '', notes: '' }, cakePhoto: null, cakeShown: false };
 
   // ---------------- language ----------------
   function applyLang() {
@@ -98,7 +113,7 @@
     $$('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
     $$('.lang button').forEach((b) => b.classList.toggle('on', b.dataset.lang === lang));
     $('#rules').replaceChildren(...t('rules').map((r) => { const li = document.createElement('li'); li.textContent = r; return li; }));
-    if (S.cat) { renderHero(); renderCal(); renderSlots(); renderKids(); renderMenu(); renderAddons(); renderSummary(); }
+    if (S.cat) { renderHero(); renderCal(); renderSlots(); renderKids(); renderMenu(); renderAddons(); renderCustomCake(true); renderSummary(); }
   }
   $$('.lang button').forEach((b) => b.addEventListener('click', () => { lang = b.dataset.lang; try { localStorage.setItem('mk_lang', lang); } catch (e) { /* abaikan */ } applyLang(); }));
 
@@ -328,12 +343,85 @@
       });
       det.appendChild(list); box.appendChild(det);
     });
+    renderCustomCake();
+  }
+
+  // ---------------- custom cake ----------------
+  const customOn = () => !!(S.cat && S.cat.customCakeId && S.items[S.cat.customCakeId]);
+  function renderCustomCake(force) {
+    const box = $('#customCake');
+    const on = customOn();
+    $('#cakeDetailsField').classList.toggle('hidden', on);
+    if (!on) { box.classList.add('hidden'); S.cakeShown = false; return; }
+    if (S.cakeShown && !force) return;
+    S.cakeShown = true;
+    box.classList.remove('hidden');
+    const o = S.cat.cakeOptions || { layered: [], plain: [], filling: [], finishing: [] };
+    const c = S.cake;
+    const opts = (list, val, empty) => '<option value="">' + esc(empty) + '</option>' + list.map((n) => '<option' + (n === val ? ' selected' : '') + '>' + esc(n) + '</option>').join('');
+    box.innerHTML = '<h4>🎂 ' + esc(t('cc_t')) + '</h4><p class="lead">' + esc(t('cc_lead')) + '</p>' +
+      '<div class="seg"><button type="button" class="chip' + (c.type === 'layered' ? ' sel' : '') + '" data-ct="layered">' + esc(t('cc_layered')) + '</button>' +
+      '<button type="button" class="chip' + (c.type === 'plain' ? ' sel' : '') + '" data-ct="plain">' + esc(t('cc_plain')) + '</button></div>' +
+      '<div class="grid2">' +
+      '<div class="field"><label for="ccFlavor">' + esc(t('cc_flavor')) + ' *</label><select id="ccFlavor">' + opts(c.type === 'plain' ? o.plain : o.layered, c.flavor, t('cc_choose')) + '</select></div>' +
+      (c.type === 'layered' ? '<div class="field"><label for="ccFilling">' + esc(t('cc_filling')) + '</label><select id="ccFilling">' + opts(o.filling, c.filling, t('cc_ask')) + '</select></div>' : '') +
+      '<div class="field"><label for="ccFinishing">' + esc(t('cc_finishing')) + '</label><select id="ccFinishing">' + opts(o.finishing, c.finishing, t('cc_ask')) + '</select><span class="hint">' + esc(t('cc_finish_hint')) + '</span></div>' +
+      '</div>' +
+      '<div class="field" style="margin-top:12px"><label for="ccPhoto">' + esc(t('cc_photo')) + '</label><span class="hint">' + esc(t('cc_photo_hint')) + '</span>' +
+      '<div class="photo">' + (S.cakePhoto ? (S.cakePhoto.preview ? '<img alt="" src="' + esc(S.cakePhoto.preview) + '">' : '<span class="small">📎 ' + esc(S.cakePhoto.name) + '</span>') + '<button type="button" class="btn ghost sm" id="ccPhotoDel">' + esc(t('cc_remove_photo')) + '</button>' : '<input type="file" id="ccPhoto" accept="image/*">') +
+      '<span class="hint" id="ccPhotoMsg"></span></div></div>' +
+      '<div class="field" style="margin-top:12px"><label for="ccNotes">' + esc(t('cc_notes')) + '</label><textarea id="ccNotes" rows="2" maxlength="600"></textarea></div>';
+    $('#ccNotes').value = c.notes;
+    $$('[data-ct]', box).forEach((b) => b.addEventListener('click', () => {
+      if (c.type === b.dataset.ct) return;
+      c.type = b.dataset.ct; c.flavor = ''; if (c.type === 'plain') c.filling = '';
+      renderCustomCake(true);
+    }));
+    $('#ccFlavor').addEventListener('change', (e) => { c.flavor = e.target.value; });
+    if ($('#ccFilling')) $('#ccFilling').addEventListener('change', (e) => { c.filling = e.target.value; });
+    $('#ccFinishing').addEventListener('change', (e) => { c.finishing = e.target.value; });
+    $('#ccNotes').addEventListener('input', (e) => { c.notes = e.target.value; });
+    if ($('#ccPhotoDel')) $('#ccPhotoDel').addEventListener('click', () => { S.cakePhoto = null; renderCustomCake(true); });
+    if ($('#ccPhoto')) $('#ccPhoto').addEventListener('change', async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const msg = $('#ccPhotoMsg');
+      if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|heic|heif|gif)$/i.test(f.name)) { msg.textContent = t('err_photo'); e.target.value = ''; return; }
+      msg.textContent = t('cc_reading');
+      try { S.cakePhoto = await readPhoto(f); renderCustomCake(true); } catch (err) { msg.textContent = err.message || t('err_photo'); e.target.value = ''; }
+    });
+  }
+  // Perkecil foto di browser (maks 1600 px, JPEG) supaya upload cepat.
+  function readPhoto(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const max = 1600, s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.naturalWidth * s); cv.height = Math.round(img.naturalHeight * s);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        const dataUrl = cv.toDataURL('image/jpeg', 0.85);
+        resolve({ name: file.name, mime: 'image/jpeg', data: dataUrl.split(',')[1], preview: dataUrl });
+      };
+      img.onerror = () => {
+        // format yang tidak bisa dibaca browser (mis. HEIC): kirim file asli bila tidak terlalu besar
+        URL.revokeObjectURL(url);
+        if (file.size > 7 * 1024 * 1024) { reject(new Error(t('err_photo'))); return; }
+        const r = new FileReader();
+        r.onload = () => resolve({ name: file.name, mime: file.type || 'image/heic', data: String(r.result).split(',')[1], preview: '' });
+        r.onerror = () => reject(new Error(t('err_photo')));
+        r.readAsDataURL(file);
+      };
+      img.src = url;
+    });
   }
   function setQty(id, q) { if (q <= 0) delete S.items[id]; else S.items[id] = Math.min(500, q); renderAddons(); requestQuote(); }
 
   // ---------------- quote & summary ----------------
   let qTimer = null, qSeq = 0;
-  function payload() {
+  function payload(withPhoto) {
     return {
       date: S.date, session: S.session, time: S.time, locationId: S.locationId,
       children: kidsCount(), adults: parseInt($('#adults').value, 10) || 0,
@@ -341,7 +429,9 @@
       birthdayChildren: S.kids.map((k) => ({ name: k.name.trim(), dob: k.dob, age: k.age })),
       theme: $('#theme').value, cakeDetails: $('#cakeDetails').value, cakeWriting: $('#cakeWriting').value,
       contactName: $('#contactName').value, whatsapp: $('#whatsapp').value, email: $('#email').value, notes: $('#notes').value,
-      agree: $('#agree').checked, lang
+      agree: $('#agree').checked, lang,
+      customCake: customOn() ? Object.assign({}, S.cake) : undefined,
+      cakePhoto: withPhoto && customOn() && S.cakePhoto ? { name: S.cakePhoto.name, mime: S.cakePhoto.mime, data: S.cakePhoto.data } : undefined
     };
   }
   function requestQuote() {
@@ -362,6 +452,7 @@
     const q = S.quote;
     if (!q) {
       lines.innerHTML = '<div class="muted small">' + esc(errMsg || t('sum_empty')) + '</div>';
+      $('#totalLabel').textContent = t('total');
       $('#total').textContent = '—'; $('#deposit').textContent = '—'; $('#depPct').textContent = ''; $('#qNotes').textContent = '';
       $('#mbTotal').textContent = '—'; $('#mbDep').textContent = '—';
       return;
@@ -373,6 +464,7 @@
       const b = document.createElement('span'); b.textContent = rp(l.amount);
       d.append(a, b); return d;
     }));
+    $('#totalLabel').textContent = q.estimate ? t('total_est') : t('total');
     $('#total').textContent = rp(q.total); $('#deposit').textContent = rp(q.deposit); $('#depPct').textContent = '(' + q.depositPercent + '%)';
     $('#qNotes').textContent = q.notes.join(' · ');
     $('#mbTotal').textContent = rp(q.total); $('#mbDep').textContent = rp(q.deposit);
@@ -393,11 +485,12 @@
   $('#bookForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     $('#formErr').classList.add('hidden');
-    const p = payload();
+    const p = payload(true);
     if (!p.date) return showErr(t('err_date'), '#s-date');
     if (!p.locationId || !p.session || !p.time) return showErr(t('err_slot'), '#s-slot');
     if (!p.children) return showErr(t('err_children'), '#children');
     if (!p.birthdayChildren.some((k) => k.name)) return showErr(t('err_kid'), '#kids input');
+    if (p.customCake && !p.customCake.flavor) return showErr(t('err_cake_flavor'), '#ccFlavor');
     if (!p.contactName.trim()) return showErr(t('err_name'), '#contactName');
     if (!token && !p.whatsapp.trim()) return showErr(t('err_wa'), '#whatsapp');
     if (!token && !p.agree) return showErr(t('err_agree'), '#agree');
@@ -417,6 +510,7 @@
     $('#success').classList.remove('hidden');
     $('#okNo').textContent = b.id;
     $('#okWhen').textContent = dateLabel(b.date, lang) + ' · ' + b.location + ' · ' + t('session_' + b.session) + ' ' + b.time;
+    $('#okCake').classList.toggle('hidden', !b.quote.customCake);
     $('#okTotal').textContent = rp(b.quote.total); $('#okDep').textContent = rp(b.quote.deposit);
     $('#okHold').textContent = b.holdUntil.slice(0, 16);
     $('#okBank').textContent = b.bank;

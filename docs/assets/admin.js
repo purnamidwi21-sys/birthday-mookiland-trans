@@ -56,7 +56,8 @@
     const thisMonth = S.list.filter((b) => b.date.slice(0, 7) === month && b.status !== 'CANCELLED' && b.category === 'BIRTHDAY_PACKAGE');
     const next7 = up.filter((b) => b.date <= new Date(Date.parse(S.today) + 7 * 864e5).toISOString().slice(0, 10));
     const stat = (k, v) => '<div class="stat"><span>' + esc(k) + '</span><b>' + esc(v) + '</b></div>';
-    $('#stats').innerHTML = stat('Acara akan datang', up.length) + stat('7 hari ke depan', next7.length) + stat('Menunggu DP', wait.length) +
+    const cakeWait = up.filter((b) => b.cakeStatus === 'PRICE_PENDING').length;
+    $('#stats').innerHTML = stat('Acara akan datang', up.length) + stat('7 hari ke depan', next7.length) + stat('Menunggu DP', wait.length) + stat('Cake belum final', cakeWait) +
       stat('Birthday bulan ini', thisMonth.length) + stat('Dibayar (bulan ini)', rp(thisMonth.reduce((s, b) => s + (b.paid || 0), 0)));
   }
   function filtered() {
@@ -66,6 +67,7 @@
     if (S.view === 'upcoming') rows = rows.filter((b) => b.date >= S.today && b.status !== 'CANCELLED').slice().reverse();
     if (S.view === 'pending') rows = rows.filter((b) => b.status === 'PENDING' && b.date >= S.today).slice().reverse();
     if (S.view === 'past') rows = rows.filter((b) => b.date < S.today);
+    if (S.view === 'cake') rows = rows.filter((b) => b.cakeStatus === 'PRICE_PENDING' && b.status !== 'CANCELLED').slice().reverse();
     if (y) rows = rows.filter((b) => b.date.slice(0, 4) === y);
     if (q) rows = rows.filter((b) => [b.id, b.customer, b.child, b.whatsapp, b.venue].join(' ').toLowerCase().includes(q));
     return rows;
@@ -82,7 +84,8 @@
         '<td>' + esc(loc ? loc.name : (b.venue || '—')) + '</td><td>' + esc(b.id) + (b.source === 'LEGACY_GOOGLE_FORM' ? ' <span class="sub">lama</span>' : '') + '</td>' +
         '<td>' + esc(b.customer || '—') + '<div class="sub">' + esc(b.child) + '</div></td><td class="n">' + esc(b.children || '') + '</td>' +
         '<td class="n">' + (b.total == null ? '<span class="sub">—</span>' : esc(rp(b.total))) + '</td><td class="n">' + esc(rp(b.paid || 0)) + '</td>' +
-        '<td class="st">' + st + '<br><span class="badge b-' + esc(b.payment) + '">' + esc(PS[b.payment] || b.payment) + '</span></td></tr>';
+        '<td class="st">' + st + '<br><span class="badge b-' + esc(b.payment) + '">' + esc(PS[b.payment] || b.payment) + '</span>' +
+        (b.cakeStatus === 'PRICE_PENDING' && b.status !== 'CANCELLED' ? '<br><span class="badge b-cake">Harga cake belum final</span>' : '') + '</td></tr>';
     }).join('');
     $('#count').textContent = rows.length > 300 ? 'Menampilkan 300 dari ' + rows.length + ' booking. Pakai pencarian atau filter tahun.' : rows.length + ' booking';
   }
@@ -121,6 +124,18 @@
     }
     const extra = [['Menu buffet', b.menu], ['Kue', [b.cake, b.cakeDetails, b.cakeWriting && '“' + b.cakeWriting + '”'].filter(Boolean).join(' · ')], ['Dekorasi', b.decoration], ['Hiburan & lainnya', b.entertainment], ['Makanan & minuman tambahan', b.extraFood]].filter((x) => x[1]);
     if (extra.length) h += '<div class="info" style="margin-top:12px">' + extra.map((x) => kv(x[0], x[1])).join('') + '</div>';
+    const cakeItem = d.items.find((i) => /CAKE-CUSTOM/i.test(i.addOnId) || (S.cat && i.addOnId === S.cat.customCakeId));
+    if (b.cakeStatus || cakeItem) {
+      const pending = b.cakeStatus !== 'PRICE_FINAL';
+      h += '<div class="cakebox-a"><b>🎂 Cake custom</b> · ' + (pending ? '<span class="badge b-cake">Harga belum final</span>' : '<span class="ok">Harga final sudah diisi</span>') +
+        '<div class="small" style="margin-top:6px">' + esc(b.cakeDetails || '—') + (b.cakeWriting ? '<br>Tulisan: “' + esc(b.cakeWriting) + '”' : '') + '</div>' +
+        '<div class="small" style="margin-top:6px">' + (b.cakeRef ? '<a href="' + esc(b.cakeRef) + '" target="_blank" rel="noopener">Buka foto referensi (Google Drive)</a>' : '<span class="muted">Tidak ada foto referensi.</span>') + '</div>' +
+        (cakeItem ? '<form id="cakeForm" class="formrow"><div class="field"><label>' + (pending ? 'Harga final cake dari cake maker (Rp)' : 'Ubah harga cake (Rp)') + '</label>' +
+          '<input name="price" type="number" step="1000" min="1000" required value="' + (pending ? '' : esc(cakeItem.unitPrice)) + '" placeholder="Harga mulai ' + esc(rp(cakeItem.unitPrice)) + '"></div>' +
+          '<label class="check small" style="align-self:end"><input type="checkbox" name="notify"' + (b.email ? ' checked' : ' disabled') + '> Email harga baru ke klien' + (b.email ? '' : ' (tidak ada email)') + '</label>' +
+          '<button class="btn sm" type="submit">Simpan harga cake</button></form>' +
+          '<p class="small muted" style="margin:6px 0 0">Total' + (b.paid > 0 ? '' : ' dan DP') + ' dihitung ulang otomatis.</p>' : '') + '</div>';
+    }
     if (b.legacy) h += '<div class="legacy">Booking dari database lama. Ringkasan: ' + esc(b.legacy) + (b.total == null ? '<br>Total tagihan belum ada: isi di bawah supaya sisa tagihan bisa dihitung.' : '') + '</div>';
     if (d.participants.length) h += '<div class="sec">Anak berulang tahun</div><div class="small">' + d.participants.map((p) => esc(p.name) + (p.age !== '' ? ' (' + esc(p.age) + ')' : '') + (p.notes ? ' <span class="muted">' + esc(p.notes) + '</span>' : '')).join(' · ') + '</div>';
 
@@ -160,6 +175,15 @@
       const btn = $('button[type=submit]', ev.target); btn.disabled = true;
       try { after(await call('adminPay', { id: b.id, type: f.get('type'), amount: f.get('amount'), date: f.get('date'), method: f.get('method') })); } catch (e) { err(e.message); btn.disabled = false; }
     });
+    if ($('#cakeForm')) $('#cakeForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault(); const f = new FormData(ev.target);
+      const btn = $('button[type=submit]', ev.target); btn.disabled = true;
+      try {
+        const r = await call('adminCakePrice', { id: b.id, price: f.get('price'), notify: f.get('notify') === 'on' });
+        after(r);
+        if (r.mailed) { const m = document.createElement('div'); m.className = 'okbox small'; m.textContent = 'Harga cake disimpan dan email terkirim ke klien.'; $('#dlgBody').prepend(m); }
+      } catch (e) { err(e.message); btn.disabled = false; }
+    });
     $('#editForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
       try { after(await call('adminUpdate', { id: b.id, fields: { total: f.get('total'), deposit: f.get('deposit'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value } })); } catch (e) { err(e.message); }
@@ -181,7 +205,7 @@
   function refreshRow() {
     const b = S.current && S.current.booking; if (!b) return;
     const i = S.list.findIndex((x) => x.id === b.id);
-    if (i >= 0) Object.assign(S.list[i], { total: b.total, paid: b.paid, status: b.status, payment: b.payment, children: b.children, hold: b.hold });
+    if (i >= 0) Object.assign(S.list[i], { total: b.total, paid: b.paid, status: b.status, payment: b.payment, children: b.children, hold: b.hold, cakeStatus: b.cakeStatus });
     renderStats(); renderList();
   }
 

@@ -35,8 +35,26 @@ docs/                 frontend (GitHub Pages)
 5. **Change the admin password**
    - Open `admin.html`, log in with `mooki2026`, then use **Ganti password**.
 
-When you change `Code.gs` later, go to **Deploy → Manage deployments → Edit →
-New version** so the URL stays the same.
+When you change `Code.gs` later:
+1. Paste the new code and save.
+2. Run `setup` once. It adds any new tabs or columns and asks for new permissions (for example Google Drive for cake photos).
+3. Go to **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The URL stays the same.
+
+## Custom cake
+- When a client adds the custom cake, the form asks for:
+  - type (layered / non layered)
+  - flavour (required)
+  - filling and finishing
+  - a design reference photo
+  - design notes
+- The flavour, filling and finishing lists come from the `CakeOptions` tab. Edit that tab to change them, and set `Active` to `FALSE` to hide an option.
+- Photos are resized in the browser and saved to the Drive folder *Mookiland Birthday – Cake References* of the script owner. Each file is named after the booking number.
+- The custom cake price is a starting price, so the client sees an *estimated total*. The booking gets `CakeStatus = PRICE_PENDING`.
+- Once the cake maker confirms the price, the admin enters it in the booking detail (*Harga final cake*). The admin page then:
+  - updates the cake line and the total;
+  - recalculates the deposit, if nothing has been paid yet;
+  - sets `CakeStatus = PRICE_FINAL`;
+  - can email the new total to the client.
 
 ## Settings (`Settings` tab)
 

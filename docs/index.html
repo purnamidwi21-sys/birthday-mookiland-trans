@@ -7,7 +7,7 @@
 <meta name="description" content="Book a birthday party at Mookiland Family Park, Bali.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/style.css?v=1">
+<link rel="stylesheet" href="assets/style.css?v=2">
 </head>
 <body>
 <div class="banner hidden" id="adminBanner">Mode admin – booking dicatat dengan sumber ADMIN, tanggal & jam bebas, WhatsApp tidak wajib.</div>
@@ -86,8 +86,9 @@
         <h2><span class="n">5</span><span data-i18n="s5">Extras (optional)</span></h2>
         <p class="sub" data-i18n="s5_sub">Cake, decoration, entertainment, gift bags, food & drinks. Prices include 10% tax.</p>
         <div id="addons"><div class="loading" data-i18n="loading">Loading…</div></div>
+        <div id="customCake" class="cakebox hidden"></div>
         <div class="grid2" style="margin-top:8px">
-          <div class="field"><label for="cakeDetails" data-i18n="f_cake">Cake flavour / design notes</label><input id="cakeDetails" maxlength="300"></div>
+          <div class="field" id="cakeDetailsField"><label for="cakeDetails" data-i18n="f_cake">Cake flavour / design notes</label><input id="cakeDetails" maxlength="300"></div>
           <div class="field"><label for="cakeWriting" data-i18n="f_writing">Writing on the cake</label><input id="cakeWriting" maxlength="120"></div>
         </div>
       </section>
@@ -114,7 +115,7 @@
       <h3 data-i18n="sum_t">Your party</h3>
       <div class="sel-info" id="selInfo" data-i18n="sel_none">No date chosen yet.</div>
       <div class="lines" id="lines"><div class="muted small" data-i18n="sum_empty">Your price appears here.</div></div>
-      <div class="tot"><span data-i18n="total">Total</span><span id="total">—</span></div>
+      <div class="tot"><span id="totalLabel" data-i18n="total">Total</span><span id="total">—</span></div>
       <div class="dep"><span><span data-i18n="deposit">Deposit</span> <span id="depPct"></span></span><span id="deposit">—</span></div>
       <div class="notes" id="qNotes"></div>
       <p class="small muted" data-i18n="sum_foot">The balance is paid on the party day. Prices include 10% tax.</p>
@@ -130,6 +131,7 @@
       <div class="okbox">
         <div class="line"><span data-i18n="total">Total</span><span id="okTotal">—</span></div>
         <div class="line"><b data-i18n="ok_dep">Deposit to pay</b><b id="okDep">—</b></div>
+        <p class="small hidden" id="okCake" data-i18n="ok_cake">Your custom cake has a starting price. We will send you the final price once our cake maker has reviewed your design.</p>
         <p class="small"><span data-i18n="ok_hold">Please pay the deposit before</span> <b id="okHold">—</b> <span data-i18n="ok_hold2">to keep your slot.</span></p>
         <div class="bank" id="okBank"></div>
       </div>
@@ -144,8 +146,8 @@
   <a href="#summary" class="btn ghost sm" data-i18n="details">Details</a>
 </div>
 
-<script src="config.js?v=1"></script>
-<script src="assets/common.js?v=1"></script>
-<script src="assets/book.js?v=1"></script>
+<script src="config.js?v=2"></script>
+<script src="assets/common.js?v=2"></script>
+<script src="assets/book.js?v=2"></script>
 </body>
 </html>

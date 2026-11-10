@@ -28,8 +28,26 @@ var DEFAULT_SETTINGS = [
 
 var EXTRA_TABS = {
   BookingItems: ['ItemId', 'BookingId', 'AddOnId', 'Category', 'Name', 'Qty', 'Unit', 'UnitPrice', 'Amount', 'Note'],
-  Holidays: ['Date', 'Name']
+  Holidays: ['Date', 'Name'],
+  CakeOptions: ['Group', 'Name', 'Active']
 };
+
+// Kolom tambahan di tab Bookings (ditambahkan otomatis oleh setup)
+var BOOKING_EXTRA_COLS = ['CakeStatus', 'CakeReferenceUrl'];
+
+// Pilihan cake custom (sumber: Google Form cake custom). Bisa diubah di tab CakeOptions.
+var CAKE_GROUPS = { LAYERED: 'Flavor - Layered', PLAIN: 'Flavor - Non Layered', FILLING: 'Filling', FINISHING: 'Finishing' };
+var CAKE_OPTIONS = [
+  [CAKE_GROUPS.LAYERED, ['Chocolate sponge', 'Chocolate mud', 'Earl Grey Tea', 'Red Velvet', 'Vanilla', 'Vanilla Chocolate Chip', 'White Chocolate', 'Caramel', 'Almond',
+    'Coffee', 'Cheese Sponge', 'Coconut', 'Raspberry', 'Strawberry', 'Passion Fruit', 'Green Tea', 'Carrot Cake with Cheese Cream', 'Banana']],
+  [CAKE_GROUPS.PLAIN, ['Butter Cake', 'English Fruit Cake']],
+  [CAKE_GROUPS.FILLING, ['Dark Chocolate Ganache', 'White Chocolate Ganache', 'Milk Chocolate Ganache', 'Coffee Ganache', 'Oreo Cream', 'Raspberry Ganache',
+    'Strawberry Ganache', 'Cherry Ganache', 'Blueberry Ganache', 'Peanut Butter', 'Lemon Ganache', 'Passion Fruit Ganache', 'Green Tea Ganache',
+    'Hazelnut Ganache', 'Caramel Ganache', 'Mint Ganache', 'Butter Cream (for naked cakes)']],
+  [CAKE_GROUPS.FINISHING, ['Fondant (any color)', 'Butter Cream', 'Royal Icing', 'Cream Cheese', 'Coconut Floss', 'Chocolate Shards (white or dark)',
+    'Chocolate Ganache (white or dark)', 'Chocolate Shaved']]
+];
+var CAKE_FOLDER_NAME = 'Mookiland Birthday – Cake References';
 
 var HOLIDAYS_2026 = [
   ['2026-01-01', "New Year's Day"], ['2026-01-16', "Isra Mi'raj"], ['2026-02-17', 'Chinese New Year'],
@@ -61,8 +79,20 @@ function setup() {
   DEFAULT_SETTINGS.forEach(function (s) {
     if (keys.indexOf(s[0]) < 0) st.appendRow([s[0], s[1], today]);
   });
+  var co = ss.getSheetByName('CakeOptions');
+  if (co.getLastRow() < 2) {
+    var rows = [];
+    CAKE_OPTIONS.forEach(function (g) { g[1].forEach(function (n) { rows.push([g[0], n, true]); }); });
+    co.getRange(2, 1, rows.length, 3).setValues(rows);
+  }
+  var bk = ss.getSheetByName(TAB.BOOKINGS);
+  var bh = head_(bk);
+  BOOKING_EXTRA_COLS.forEach(function (c) {
+    if (bh.indexOf(c) < 0) { bk.getRange(1, bh.length + 1).setValue(c); bh.push(c); }
+  });
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ADMIN_PASSWORD')) props.setProperty('ADMIN_PASSWORD', 'mooki2026');
+  cakeFolder_(); // membuat folder Drive untuk foto referensi cake (dan meminta izin Drive)
   log_('setup', 'SYSTEM', 'Setup', '', 'Tabs & settings checked');
   return 'Setup selesai. Password admin awal: ' + props.getProperty('ADMIN_PASSWORD') + ' (ganti lewat halaman admin).';
 }
@@ -102,7 +132,8 @@ var ROUTES = {
   adminDeletePayment: function (p, token) { requireAdmin_(token); return adminDeletePayment_(p); },
   adminUpdate: function (p, token) { requireAdmin_(token); return adminUpdate_(p); },
   adminBlock: function (p, token) { requireAdmin_(token); return adminBlock_(p); },
-  adminPassword: function (p, token) { requireAdmin_(token); return adminPassword_(p); }
+  adminPassword: function (p, token) { requireAdmin_(token); return adminPassword_(p); },
+  adminCakePrice: function (p, token) { requireAdmin_(token); return adminCakePrice_(p); }
 };
 
 /* ------------------------------------------------------------------ sheet helpers */
@@ -201,6 +232,7 @@ function catalog_() {
   } catch (e) { menu = []; }
   var holidays = [];
   try { holidays = table_(TAB.HOLIDAYS).rows.map(function (r) { return iso_(r.Date); }).filter(String); } catch (e) { holidays = []; }
+  var customCake = addons.filter(function (a) { return /cake/i.test(a.category) && /CUSTOM/i.test(a.id); })[0];
   return {
     business: String(s.BusinessName || 'Mookiland Birthday Party'),
     currency: String(s.Currency || 'IDR'),
@@ -224,8 +256,69 @@ function catalog_() {
       { id: 'Afternoon', label: String(s.SessionAfternoonLabel || 'Afternoon'), times: times_(s.AfternoonStartTimes || '15:00, 16:00, 17:00') }
     ],
     locations: locations, addons: addons, menu: menu, holidays: holidays,
+    customCakeId: customCake ? customCake.id : '', cakeOptions: cakeOptions_(),
     today: today_()
   };
+}
+
+function cakeOptions_() {
+  var out = { layered: [], plain: [], filling: [], finishing: [] };
+  var key = {}; key[CAKE_GROUPS.LAYERED] = 'layered'; key[CAKE_GROUPS.PLAIN] = 'plain'; key[CAKE_GROUPS.FILLING] = 'filling'; key[CAKE_GROUPS.FINISHING] = 'finishing';
+  try {
+    table_('CakeOptions').rows.forEach(function (r) {
+      var k = key[String(r.Group).trim()];
+      if (k && r.Name && (r.Active === '' || bool_(r.Active))) out[k].push(String(r.Name).trim());
+    });
+  } catch (e) {
+    CAKE_OPTIONS.forEach(function (g) { out[key[g[0]]] = g[1].slice(); });
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ custom cake */
+
+function cakeFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('CAKE_FOLDER_ID');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) { /* folder dihapus: buat lagi */ } }
+  var f = DriveApp.createFolder(CAKE_FOLDER_NAME);
+  props.setProperty('CAKE_FOLDER_ID', f.getId());
+  return f;
+}
+
+// Validasi isian cake custom. Mengembalikan objek bersih + teks ringkas untuk kolom CakeDetails.
+function customCake_(c, cat) {
+  c = c || {};
+  var o = cat.cakeOptions;
+  var type = c.type === 'plain' ? 'plain' : 'layered';
+  var pick = function (v, list, label, required) {
+    v = clean_(v, 80);
+    if (!v) { if (required) throw new Error('Custom cake: please choose the ' + label + '.'); return ''; }
+    if (list.indexOf(v) < 0) throw new Error('Custom cake: unknown ' + label + ' "' + v + '".');
+    return v;
+  };
+  var flavor = pick(c.flavor, type === 'plain' ? o.plain : o.layered, 'cake flavour', true);
+  var filling = type === 'layered' ? pick(c.filling, o.filling, 'filling', false) : '';
+  var finishing = pick(c.finishing, o.finishing, 'finishing', false);
+  var notes = clean_(c.notes, 600);
+  var parts = ['Custom cake (' + (type === 'plain' ? 'non layered' : 'layered') + ')', 'Flavour: ' + flavor];
+  if (filling) parts.push('Filling: ' + filling);
+  parts.push('Finishing: ' + (finishing || 'follow design / ask cake maker'));
+  if (notes) parts.push('Design notes: ' + notes);
+  return { type: type, flavor: flavor, filling: filling, finishing: finishing, notes: notes, text: parts.join(' · ') };
+}
+
+function saveCakePhoto_(bookingId, photo) {
+  if (!photo || !photo.data) return '';
+  var mime = String(photo.mime || '');
+  if (!/^image\/(jpeg|png|webp|gif|heic|heif)$/.test(mime)) throw new Error('Cake reference must be an image.');
+  var bytes = Utilities.base64Decode(String(photo.data));
+  if (bytes.length > 8 * 1024 * 1024) throw new Error('Cake reference photo is too large (max 8 MB).');
+  var ext = mime.split('/')[1].replace('jpeg', 'jpg');
+  var blob = Utilities.newBlob(bytes, mime, bookingId + ' - cake reference.' + ext);
+  var file = cakeFolder_().createFile(blob);
+  file.setDescription('Cake reference for booking ' + bookingId + ' (' + clean_(photo.name, 120) + ')');
+  return file.getUrl();
 }
 
 /* ------------------------------------------------------------------ availability */
@@ -332,7 +425,11 @@ function quote_(p, cat, admin) {
     if (qty > 500) throw new Error('Jumlah terlalu besar: ' + a.name);
     var line = { type: 'addon', id: a.id, category: a.category, name: a.name, qty: qty, unit: a.unit, unitPrice: a.price, amount: a.price * qty, note: String(it.note || '').slice(0, 200) };
     if (a.price === 0) line.note = (line.note ? line.note + ' · ' : '') + 'price per menu, billed at the restaurant';
-    if (/starting/i.test(a.description)) { line.startingPrice = true; notes.push(a.name + ': starting price, final price confirmed by our team'); }
+    if (a.id === cat.customCakeId) {
+      line.startingPrice = true;
+      line.note = 'Starting price · final price confirmed by our cake maker';
+      notes.push('Custom cake: starting price. The final price is confirmed after our cake maker reviews your design.');
+    } else if (/starting/i.test(a.description)) { line.startingPrice = true; notes.push(a.name + ': starting price, final price confirmed by our team'); }
     lines.push(line);
   });
   var adults = Math.max(0, Math.floor(num_(p.adults)));
@@ -344,7 +441,9 @@ function quote_(p, cat, admin) {
   var deposit = Math.round(total * cat.depositPercent / 100);
   return { date: date, weekend: weekend, children: children, billedKids: billedKids, unitPrice: unit, lines: lines,
     packageAmount: packageAmount, venueFee: venueFee, addOnsTotal: addOnsTotal, total: total, deposit: deposit,
-    depositPercent: cat.depositPercent, notes: notes };
+    depositPercent: cat.depositPercent, notes: notes,
+    estimate: lines.some(function (l) { return l.startingPrice; }),
+    customCake: lines.some(function (l) { return l.id === cat.customCakeId; }) };
 }
 
 /* ------------------------------------------------------------------ create booking */
@@ -394,6 +493,8 @@ function createBooking_(p, admin) {
   if (!admin && !p.agree) throw new Error('Please agree to the rules and terms.');
 
   var q = quote_(p, cat, admin);
+  var cake = q.customCake ? customCake_(p.customCake, cat) : null;
+  if (p.cakePhoto && p.cakePhoto.data && String(p.cakePhoto.data).length > 11 * 1024 * 1024) throw new Error('Cake reference photo is too large.');
 
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -431,7 +532,8 @@ function createBooking_(p, admin) {
       CustomerId: custId, EventCategory: 'BIRTHDAY_PACKAGE', EventType: 'Birthday Package', EventTime: txt_(time),
       VenueLegacy: loc ? loc.name : '', AdultsCount: Math.floor(num_(p.adults)) || '', ChildrenPlanned: q.children,
       Theme: clean_(p.theme, 100), BirthdayCake: cakeSummary,
-      CakeDetails: clean_(p.cakeDetails, 300), CakeWriting: clean_(p.cakeWriting, 120),
+      CakeDetails: cake ? cake.text + (clean_(p.cakeDetails, 300) ? ' · ' + clean_(p.cakeDetails, 300) : '') : clean_(p.cakeDetails, 300),
+      CakeWriting: clean_(p.cakeWriting, 120), CakeStatus: cake ? 'PRICE_PENDING' : '',
       Decoration: cats(/decoration/i).map(function (l) { return l.name; }).join(', '),
       Entertainment: [ent, byo, favours].filter(String).join(', '),
       BuffetMenu: menuNames.join(', '), ExtraFoodBeverage: fb, TotalPaid: 0
@@ -452,8 +554,17 @@ function createBooking_(p, admin) {
   } finally {
     lock.releaseLock();
   }
+  var photoUrl = '';
+  if (cake && p.cakePhoto && p.cakePhoto.data) {
+    try {
+      photoUrl = saveCakePhoto_(id, p.cakePhoto);
+      var saved = findBooking_(id);
+      setFields_(TAB.BOOKINGS, saved._row, { CakeReferenceUrl: photoUrl });
+    } catch (e) { log_('system', 'CAKE_PHOTO_FAILED', 'Booking', id, String(e)); }
+  }
   var booking = { id: id, date: date, session: session, time: time, location: loc ? loc.name : '', contactName: name, email: email, whatsapp: wa,
-    children: q.children, adults: Math.floor(num_(p.adults)) || 0, kids: kids, menu: menuNames, quote: q, holdUntil: hold, bank: cat.bank, contact: cat.whatsapp };
+    children: q.children, adults: Math.floor(num_(p.adults)) || 0, kids: kids, menu: menuNames, quote: q, holdUntil: hold, bank: cat.bank, contact: cat.whatsapp,
+    cake: cake ? cake.text : '', cakeWriting: clean_(p.cakeWriting, 120), cakePhoto: photoUrl, cakePhotoSent: !!(p.cakePhoto && p.cakePhoto.data) };
   try { sendBookingEmails_(booking, cat); } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', id, String(e)); }
   return booking;
 }
@@ -487,7 +598,7 @@ function bookingHtml_(b) {
       '</td><td style="padding:4px 8px;text-align:right">' + l.qty + '</td><td style="padding:4px 8px;text-align:right">' + rp_(l.amount) + '</td></tr>';
   }).join('');
   return '<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">' + rows +
-    '<tr><td style="padding:6px 8px;border-top:1px solid #ccc"><b>Total</b></td><td></td><td style="padding:6px 8px;border-top:1px solid #ccc;text-align:right"><b>' + rp_(q.total) + '</b></td></tr>' +
+    '<tr><td style="padding:6px 8px;border-top:1px solid #ccc"><b>' + (q.estimate ? 'Estimated total' : 'Total') + '</b></td><td></td><td style="padding:6px 8px;border-top:1px solid #ccc;text-align:right"><b>' + rp_(q.total) + '</b></td></tr>' +
     '<tr><td style="padding:4px 8px">Deposit (' + q.depositPercent + '%)</td><td></td><td style="padding:4px 8px;text-align:right">' + rp_(q.deposit) + '</td></tr></table>';
 }
 
@@ -495,7 +606,8 @@ function sendBookingEmails_(b, cat) {
   if (!bool_(settings_().SendEmails === undefined ? 'TRUE' : settings_().SendEmails)) return;
   var info = '<p style="font-family:Arial,sans-serif;font-size:14px"><b>Booking no.:</b> ' + esc_(b.id) + '<br><b>Date:</b> ' + esc_(b.date) + ' · ' + esc_(b.session) + ' ' + esc_(b.time) +
     '<br><b>Area:</b> ' + esc_(b.location) + '<br><b>Birthday child:</b> ' + esc_(b.kids.map(function (k) { return k.name + (k.age !== '' ? ' (' + k.age + ')' : ''); }).join(', ')) +
-    '<br><b>Children / adults:</b> ' + b.children + ' / ' + b.adults + '<br><b>Buffet menu:</b> ' + esc_(b.menu.join(', ')) + '</p>';
+    '<br><b>Children / adults:</b> ' + b.children + ' / ' + b.adults + '<br><b>Buffet menu:</b> ' + esc_(b.menu.join(', ')) +
+    (b.cake ? '<br><b>Cake:</b> ' + esc_(b.cake) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') : '') + '</p>';
   var notes = b.quote.notes.length ? '<p style="font-family:Arial,sans-serif;font-size:13px;color:#555">' + b.quote.notes.map(esc_).join('<br>') + '</p>' : '';
   if (b.email) {
     MailApp.sendEmail({
@@ -510,8 +622,27 @@ function sendBookingEmails_(b, cat) {
   }
   var admin = String(settings_().AdminEmail || '');
   if (admin) {
-    MailApp.sendEmail({ to: admin, subject: 'Booking baru ' + b.id + ' – ' + b.date + ' ' + b.session, htmlBody: '<p style="font-family:Arial,sans-serif">Kontak: ' + esc_(b.contactName) + ' · ' + esc_(b.whatsapp) + ' · ' + esc_(b.email) + '</p>' + info + bookingHtml_(b) + notes, name: cat.business });
+    var cakeAdmin = b.cake ? '<p style="font-family:Arial,sans-serif;font-size:14px;background:#fff7e6;padding:8px"><b>Cake custom – harga belum final.</b> Kirim detail ke cake maker, lalu isi harga final di halaman admin.' +
+      (b.cakePhoto ? '<br>Foto referensi: <a href="' + esc_(b.cakePhoto) + '">' + esc_(b.cakePhoto) + '</a>' : b.cakePhotoSent ? '<br>Foto referensi gagal disimpan – minta lewat WhatsApp.' : '<br>Klien tidak mengunggah foto referensi.') + '</p>' : '';
+    MailApp.sendEmail({ to: admin, subject: 'Booking baru ' + b.id + ' – ' + b.date + ' ' + b.session + (b.cake ? ' (cake custom)' : ''), htmlBody: '<p style="font-family:Arial,sans-serif">Kontak: ' + esc_(b.contactName) + ' · ' + esc_(b.whatsapp) + ' · ' + esc_(b.email) + '</p>' + info + cakeAdmin + bookingHtml_(b) + notes, name: cat.business });
   }
+}
+
+function sendCakePriceEmail_(row, oldPrice, newPrice) {
+  var email = String(row.Email || '');
+  if (!email || !bool_(settings_().SendEmails === undefined ? 'TRUE' : settings_().SendEmails)) return false;
+  var cat = catalog_();
+  var paid = num_(row.TotalPaid), total = num_(row.BookingTotal);
+  MailApp.sendEmail({
+    to: email,
+    subject: 'Your custom cake price – ' + row.BookingId,
+    htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(row.CustomerName) + ',<br><br>Our cake maker has reviewed your custom cake design for booking <b>' + esc_(row.BookingId) + '</b> (' + esc_(iso_(row.EventDate)) + ').<br><br>' +
+      'Custom cake – final price: <b>' + rp_(newPrice) + '</b> (starting price was ' + rp_(oldPrice) + ')<br>' +
+      'New booking total: <b>' + rp_(total) + '</b><br>' + (paid > 0 ? 'Already paid: ' + rp_(paid) + '<br>Balance: <b>' + rp_(total - paid) + '</b><br>' : 'Deposit: <b>' + rp_(row.DepositRequired) + '</b><br>') +
+      '<br>If you have any questions, message us on WhatsApp ' + esc_(cat.whatsapp) + '.<br>All prices include 10% tax.</p>',
+    name: cat.business
+  });
+  return true;
 }
 
 /* ------------------------------------------------------------------ admin */
@@ -544,7 +675,8 @@ function bookingOut_(b) {
     payment: String(b.PaymentStatus || ''), hold: stamp_(b.HoldExpiresAt), source: String(b.Source || ''), category: String(b.EventCategory || ''),
     theme: String(b.Theme || ''), notes: String(b.SpecialRequest || ''), cake: String(b.BirthdayCake || ''), cakeDetails: String(b.CakeDetails || ''),
     cakeWriting: String(b.CakeWriting || ''), decoration: String(b.Decoration || ''), entertainment: String(b.Entertainment || ''),
-    menu: String(b.BuffetMenu || ''), extraFood: String(b.ExtraFoodBeverage || ''), legacy: String(b.LegacySummary || '')
+    menu: String(b.BuffetMenu || ''), extraFood: String(b.ExtraFoodBeverage || ''), legacy: String(b.LegacySummary || ''),
+    cakeStatus: String(b.CakeStatus || ''), cakeRef: String(b.CakeReferenceUrl || '')
   };
 }
 
@@ -553,7 +685,7 @@ function adminList_(p) {
   rows.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
   return { today: today_(), bookings: rows.map(function (b) {
     return { id: b.id, date: b.date, session: b.session, time: b.time, locationId: b.locationId, venue: b.venue, customer: b.customer, whatsapp: b.whatsapp,
-      child: b.child, children: b.children, total: b.total, paid: b.paid, status: b.status, payment: b.payment, hold: b.hold, source: b.source, category: b.category };
+      child: b.child, children: b.children, total: b.total, paid: b.paid, status: b.status, payment: b.payment, hold: b.hold, source: b.source, category: b.category, cakeStatus: b.cakeStatus };
   }) };
 }
 
@@ -656,4 +788,32 @@ function adminBlock_(p) {
   var id = 'BLK-' + Utilities.formatDate(new Date(), TZ, 'yyMMddHHmmss') + '-' + n;
   append_(TAB.BLOCKED, { BlockId: id, Date: txt_(date), LocationId: clean_(p.locationId, 40), Session: clean_(p.session, 20), Reason: clean_(p.reason, 200), CreatedAt: txt_(now_()), CreatedBy: 'admin' });
   return { blockId: id };
+}
+
+// Harga final cake custom dari cake maker: ubah item cake, hitung ulang total (dan DP bila belum ada pembayaran).
+function adminCakePrice_(p) {
+  var b = findBooking_(p.id);
+  var price = Math.round(num_(p.price));
+  if (price <= 0) throw new Error('Isi harga final cake.');
+  var cat = catalog_();
+  var it = table_(TAB.ITEMS);
+  var item = it.rows.filter(function (r) {
+    return String(r.BookingId) === String(b.BookingId) && (String(r.AddOnId) === cat.customCakeId || /CAKE-CUSTOM/i.test(String(r.AddOnId)));
+  })[0];
+  if (!item) throw new Error('Booking ini tidak punya item cake custom.');
+  var qty = Math.max(1, num_(item.Qty));
+  var oldPrice = num_(item.UnitPrice);
+  var diff = price * qty - num_(item.Amount);
+  setFields_(TAB.ITEMS, item._row, { UnitPrice: price, Amount: price * qty, Note: 'Final price confirmed by cake maker' + (oldPrice ? ' (starting price ' + rp_(oldPrice) + ')' : '') });
+  var total = num_(b.BookingTotal) + diff;
+  var out = { AddOnsTotal: num_(b.AddOnsTotal) + diff, BookingTotal: total, CakeStatus: 'PRICE_FINAL', UpdatedAt: txt_(now_()) };
+  if (num_(b.TotalPaid) <= 0) out.DepositRequired = Math.round(total * cat.depositPercent / 100);
+  setFields_(TAB.BOOKINGS, b._row, out);
+  var r = recompute_(b.BookingId);
+  log_('admin', 'CAKE_PRICE', 'Booking', String(b.BookingId), 'Cake ' + oldPrice + ' -> ' + price + ', total ' + total);
+  var mailed = false;
+  if (p.notify) {
+    try { mailed = sendCakePriceEmail_(findBooking_(b.BookingId), oldPrice, price); } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', String(b.BookingId), String(e)); }
+  }
+  return { result: r, mailed: mailed, detail: adminGet_(b.BookingId) };
 }

@@ -157,3 +157,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .top .btn.sm { padding: 6px 10px; }
   .prices .price { min-width: 0; flex: 1 1 140px; }
 }
+
+/* custom cake */
+.cakebox { border: 1.5px solid #f2c66d; background: #fffaf0; border-radius: 12px; padding: 16px; margin-top: 12px; }
+.cakebox h4 { margin: 0 0 4px; font-size: 16px; }
+.cakebox .lead { margin: 0 0 12px; font-size: 13px; color: var(--muted); }
+.cakebox .seg { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.cakebox select, .cakebox textarea { width: 100%; }
+.cakebox .grid2 { margin-top: 0; }
+.cakebox .photo { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.cakebox .photo img { width: 88px; height: 88px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+.cakebox .photo input[type=file] { max-width: 100%; }
