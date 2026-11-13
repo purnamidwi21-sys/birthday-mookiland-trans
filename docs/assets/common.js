@@ -3,11 +3,26 @@ window.MK = (function () {
   async function api(action, payload, token) {
     const url = window.API_URL;
     if (!url || /PASTE_WEB_APP_URL/.test(url)) throw new Error('API_URL belum diisi di config.js');
-    const res = await fetch(url, {
+    const READ = /^(catalog|availability|quote|adminList|adminGet|adminDraftItems|adminLogin)$/.test(action);
+    const send = () => fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // tanpa preflight CORS
       body: JSON.stringify({ action, payload: payload || {}, token: token || undefined })
     });
+    let res;
+    try { res = await send(); } catch (e) {
+      // "Failed to fetch": koneksi putus / server Google sibuk. Permintaan baca dicoba sekali lagi.
+      if (READ) {
+        await new Promise((r) => setTimeout(r, 1500));
+        try { res = await send(); } catch (e2) { res = null; }
+      }
+      if (!res) {
+        const err = new Error(READ ? 'Tidak bisa terhubung ke server. Periksa internet lalu coba lagi.' :
+          'Koneksi ke server terputus sebelum ada jawaban. Perubahan mungkin sudah tersimpan: data booking sudah dimuat ulang, periksa dulu sebelum mencoba lagi.');
+        err.network = true;
+        throw err;
+      }
+    }
     let out;
     try { out = await res.json(); } catch (e) { throw new Error('Server tidak menjawab dengan benar (' + res.status + ')'); }
     if (!out.ok) throw new Error(out.error || 'Terjadi kesalahan');

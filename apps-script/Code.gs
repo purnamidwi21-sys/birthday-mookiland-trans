@@ -1146,6 +1146,15 @@ function adminItems_(p) {
     var cakeLine = norm.filter(function (n) { return n.AddOnId === cat.customCakeId || /CAKE-CUSTOM/i.test(n.AddOnId); })[0];
     if (String(b.CakeStatus) === 'PRICE_PENDING' && cakeLine && cakeLine.row && num_(cakeLine.row.UnitPrice) !== cakeLine.UnitPrice) out.CakeStatus = 'PRICE_FINAL';
     out.ExtraFoodBeverage = norm.filter(function (n) { return /food|beverage/i.test(n.Category); }).map(function (n) { return n.Name + ' x' + n.Qty; }).join(', ');
+    // cake dari rincian -> kolom BirthdayCake / CakeDetails (untuk dapur & laporan), kecuali cake custom dari form
+    var isCake = function (r) { return /cake/i.test(String(r.Category || '')); };
+    var sig = function (arr) { return arr.filter(isCake).map(function (r) { return [r.AddOnId, r.Name, num_(r.Qty), String(r.Note || '')].join('|'); }).sort().join('#'); };
+    var cakesNew = norm.filter(isCake);
+    var hasCustom = cakesNew.some(function (n) { return /CAKE-CUSTOM/i.test(n.AddOnId) || n.AddOnId === cat.customCakeId; });
+    if (!hasCustom && sig(old) !== sig(norm)) {
+      out.BirthdayCake = cakesNew.length ? cakesNew.map(function (n) { return n.AddOnId === 'CAKE-OUTSIDE' ? 'Own cake' : n.Name; }).join(', ') : '';
+      out.CakeDetails = cakesNew.map(function (n) { return n.Name + (n.Qty > 1 ? ' x' + n.Qty : '') + (n.Note ? ': ' + n.Note : ''); }).join('; ');
+    }
     setFields_(TAB.BOOKINGS, b._row, out);
     log_('admin', 'UPDATE_ITEMS', 'Booking', String(b.BookingId), (changes.join('; ') || 'tidak ada perubahan') + ' · total ' + total);
   } finally {

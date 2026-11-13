@@ -34,6 +34,10 @@
   async function call(action, payload) {
     try { return await api(action, payload, token); } catch (e) {
       if (/login/i.test(e.message)) { token = null; showApp(false); }
+      // koneksi putus saat menyimpan: muat ulang detail supaya terlihat apa yang sudah tersimpan
+      if (e.network && !/^admin(Get|List|DraftItems)$/.test(action) && S.current && dlg.open) {
+        try { renderDetail(await api('adminGet', { id: S.current.booking.id }, token)); refreshRow(); } catch (e2) { /* biarkan */ }
+      }
       throw e;
     }
   }
@@ -197,6 +201,7 @@
 
     const err = (m) => { const e = $('#dErr'); e.textContent = m; e.classList.remove('hidden'); };
     const after = (r) => { renderDetail(r.detail || r); refreshRow(); };
+    const okMsg = (m) => { const x = document.createElement('div'); x.className = 'okbox small'; x.textContent = '✓ ' + m; $('#dlgBody').prepend(x); x.scrollIntoView({ block: 'nearest' }); };
     $('#payForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
       const btn = $('button[type=submit]', ev.target); btn.disabled = true;
@@ -252,7 +257,8 @@
         if (!confirm('Ubah jenis event menjadi ' + EV[f.get('category')] + '? Total tagihan tidak dihitung ulang otomatis; sesuaikan Total & DP bila perlu.')) return;
         fields.category = f.get('category');
       }
-      try { after(await call('adminUpdate', { id: b.id, fields })); } catch (e) { err(e.message); }
+      const btn = $('button[type=submit]', ev.target); btn.disabled = true; btn.textContent = 'Menyimpan…';
+      try { after(await call('adminUpdate', { id: b.id, fields })); okMsg('Perubahan booking tersimpan.'); } catch (e) { err(e.message); btn.disabled = false; btn.textContent = 'Simpan'; }
     });
     $$('[data-status]').forEach((btn) => btn.addEventListener('click', async () => {
       const st = btn.dataset.status;
@@ -301,7 +307,7 @@
       const billed = rows.filter((r) => !r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
       const resto = rows.filter((r) => r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
       const dep = b.paid > 0 && b.deposit != null ? b.deposit : Math.round(billed * depPct / 100);
-      box.innerHTML = '<div class="itemsed">' +
+      box.innerHTML = '<datalist id="cakeFlavours">' + ['Chocolate', 'Red Velvet', 'Vegan Chocolate', 'Lemon', 'Apple Crumble', 'Strawberry Cheesecake', 'Raspberry Cheesecake'].map((f) => '<option value="' + f + '">').join('') + '</datalist><div class="itemsed">' +
         (draft ? '<div class="draftnote"><b>Usulan rincian dari formulir lama.</b> Paket & area memakai harga sekarang; add-on memakai harga yang tertulis di formulir bila ada. Periksa, ubah bila perlu, lalu simpan.' +
           (draft.hints && draft.hints.length ? '<div style="margin-top:6px"><b>Belum masuk otomatis, cek manual:</b><ul>' + draft.hints.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>' : '') + '</div>' : '') +
         '<div class="formrow" style="margin:0 0 8px"><div class="field"><label>Jumlah anak hadir</label><input id="edKids" type="number" min="0" value="' + esc(b.children || 0) + '"></div>' +
@@ -309,7 +315,7 @@
         '<div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga (Rp)</th><th class="n">Jumlah</th><th></th></tr></thead><tbody>' +
         rows.map((r, i) => '<tr style="cursor:default' + (r.resto ? ';color:var(--muted)' : '') + '"><td>' +
           (isFree(r) ? '<input class="ed-name" data-i="' + i + '" value="' + esc(r.name) + '" placeholder="Nama item">' : esc(r.name)) +
-          (r.note ? '<div class="sub">' + esc(r.note) + '</div>' : '') +
+          '<input class="ed-note" data-i="' + i + '" value="' + esc(r.note || '') + '" maxlength="200" placeholder="' + esc(/cake/i.test(r.category || '') ? 'Rasa & tulisan, mis. 1 Lemon, 1 Chocolate · Happy Birthday Gabriel' : 'Keterangan (opsional)') + '"' + (/cake/i.test(r.category || '') ? ' list="cakeFlavours"' : '') + '>' +
           (r.resto ? ' <span class="badge b-resto">Resto</span>' : '') + '</td>' +
           '<td class="n"><input class="ed-qty" data-i="' + i + '" type="number" min="1" value="' + r.qty + '"' + (isPkg(r) ? ' title="Ikut jumlah anak"' : '') + '></td>' +
           '<td class="n"><input class="ed-price" data-i="' + i + '" type="number"' + (isFree(r) ? '' : ' min="0"') + ' step="1000" value="' + r.unitPrice + '"' + (isFree(r) ? ' title="Isi angka negatif untuk diskon"' : '') + '></td>' +
@@ -334,6 +340,7 @@
       $$('.ed-qty', box).forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].qty = Math.max(1, num(el.value)); render(); }));
       $$('.ed-price', box).forEach((el) => el.addEventListener('change', () => { const r = rows[el.dataset.i]; r.unitPrice = isFree(r) ? Math.round(Number(el.value) || 0) : num(el.value); render(); }));
       $$('.ed-name', box).forEach((el) => el.addEventListener('input', () => { rows[el.dataset.i].name = el.value; }));
+      $$('.ed-note', box).forEach((el) => el.addEventListener('input', () => { rows[el.dataset.i].note = el.value; }));
       $$('.ed-del', box).forEach((el) => el.addEventListener('click', () => { rows.splice(Number(el.dataset.i), 1); render(); }));
       $('#edAddBtn').addEventListener('click', () => {
         const v = $('#edAdd').value; if (!v) return;
@@ -345,6 +352,7 @@
         }
         render();
         if (v === '__custom') { const n = $$('.ed-name', box); n[n.length - 1].focus(); }
+        else { const n = $$('.ed-note', box); if (/cake/i.test(rows[rows.length - 1].category || '')) n[n.length - 1].focus(); }
       });
       $('#edCancel').addEventListener('click', () => renderDetail(S.current));
       if (draft) $('#edNotify').checked = false; // booking lama: kirim invoice hanya bila dicentang
@@ -354,7 +362,7 @@
         const btn = ev.currentTarget; btn.disabled = true;
         try {
           const r = await call('adminItems', { id: b.id, children: b.children, notify: $('#edNotify').checked,
-            items: rows.map((x) => x.itemId ? { itemId: x.itemId, qty: x.qty, unitPrice: x.unitPrice, name: x.name } : { type: x.type, addOnId: x.addOnId === 'CUSTOM' ? '' : x.addOnId, name: x.name, qty: x.qty, unitPrice: x.unitPrice, note: x.note || '' }) });
+            items: rows.map((x) => x.itemId ? { itemId: x.itemId, qty: x.qty, unitPrice: x.unitPrice, name: x.name, note: x.note || '' } : { type: x.type, addOnId: x.addOnId === 'CUSTOM' ? '' : x.addOnId, name: x.name, qty: x.qty, unitPrice: x.unitPrice, note: x.note || '' }) });
           after(r);
           const m = document.createElement('div'); m.className = 'okbox small';
           m.textContent = 'Rincian disimpan' + (r.changes && r.changes.length ? ' (' + r.changes.length + ' perubahan)' : '') + (r.sent ? ' dan invoice terbaru terkirim ke ' + b.email + '.' : '.');
