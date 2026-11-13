@@ -710,12 +710,26 @@ function taxNote_() {
 var PAYMENT_LABELS = { DEPOSIT: 'Deposit', SECOND_PAYMENT: '2nd payment', FINAL: 'Final payment', ADJUSTMENT: 'Adjustment', REFUND: 'Refund' };
 
 // Invoice (bahasa Inggris, format mengikuti PROFORMA INVOICE di Excel lama). Nomor invoice = INV-<no. booking>.
+// Booking lama tanpa rincian: invoice tetap per item, memakai usulan rincian dari data formulir lama.
+function legacyInvoiceItems_(b) {
+  try {
+    return adminDraftItems_(b.id).items.map(function (i) {
+      var note = /formulir lama|Cek jumlah/i.test(i.note || '') ? '' : (i.note || '');
+      return { name: i.name, qty: i.qty, unitPrice: i.unitPrice, amount: i.qty * i.unitPrice, note: note, billing: i.resto ? 'RESTAURANT' : 'INVOICE' };
+    });
+  } catch (e) { return []; }
+}
+
 function invoiceHtml_(d, cat) {
   var b = d.booking, s = settings_();
   var number = 'INV-' + b.id;
-  var resto = d.items.filter(function (i) { return i.billing === 'RESTAURANT'; });
-  var billed = d.items.filter(function (i) { return i.billing !== 'RESTAURANT'; });
+  var items = d.items;
+  if (!items.length) items = legacyInvoiceItems_(b);
+  var resto = items.filter(function (i) { return i.billing === 'RESTAURANT'; });
+  var billed = items.filter(function (i) { return i.billing !== 'RESTAURANT'; });
   var total = b.total === null ? billed.reduce(function (t, i) { return t + i.amount; }, 0) : b.total;
+  var diff = total - billed.reduce(function (t, i) { return t + i.amount; }, 0);
+  if (billed.length && diff !== 0) billed.push({ name: diff < 0 ? 'Discount / adjustment' : 'Other charges (as agreed)', qty: 1, unitPrice: diff, amount: diff, note: '' });
   var paid = d.payments.reduce(function (t, p) { return t + p.amount; }, 0);
   var balance = total - paid;
   var isPaid = total > 0 && balance <= 0;
