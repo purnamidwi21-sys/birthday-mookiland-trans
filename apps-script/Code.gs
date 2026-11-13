@@ -26,7 +26,9 @@ var DEFAULT_SETTINGS = [
   ['BookingFormOpen', 'TRUE', 'FALSE = form booking online ditutup sementara'],
   ['InvoiceTaxNote', 'The birthday package is not subject to tax. Prices of extras include 10% tax.', 'Catatan pajak di invoice & email klien'],
   ['InvoiceFooter', 'Mookiland Family Park, Bali', 'Baris alamat/nama usaha di bagian atas invoice'],
-  ['RestaurantCategories', 'Food & Beverage, Food & Beverage (Adults)', 'Kategori add-on yang dipesan & dibayar di restoran (penjualan biasa): tampil sebagai info, tidak masuk invoice/total/DP']
+  ['RestaurantCategories', 'Food & Beverage, Food & Beverage (Adults)', 'Kategori add-on yang dipesan & dibayar di restoran (penjualan biasa): tampil sebagai info, tidak masuk invoice/total/DP'],
+  ['AutoDepositReminder', 'TRUE', 'TRUE = kirim email reminder DP otomatis (sekali, setiap pagi jam 09:00 dicek) untuk booking yang belum bayar DP'],
+  ['ReminderAfterHours', '24', 'Reminder otomatis dikirim bila booking sudah berumur sekian jam dan masa tahan slot belum habis']
 ];
 
 var EXTRA_TABS = {
@@ -109,6 +111,7 @@ function setup() {
   });
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ADMIN_PASSWORD')) props.setProperty('ADMIN_PASSWORD', 'mooki2026');
+  installReminderTrigger_();
   cakeFolder_(); // membuat folder Drive untuk foto referensi cake (dan meminta izin Drive)
   log_('setup', 'SYSTEM', 'Setup', '', 'Tabs & settings checked');
   return 'Setup selesai. Password admin awal: ' + props.getProperty('ADMIN_PASSWORD') + ' (ganti lewat halaman admin).';
@@ -151,7 +154,9 @@ var ROUTES = {
   adminBlock: function (p, token) { requireAdmin_(token); return adminBlock_(p); },
   adminPassword: function (p, token) { requireAdmin_(token); return adminPassword_(p); },
   adminCakePrice: function (p, token) { requireAdmin_(token); return adminCakePrice_(p); },
-  adminInvoice: function (p, token) { requireAdmin_(token); return adminInvoice_(p); }
+  adminItems: function (p, token) { requireAdmin_(token); return adminItems_(p); },
+  adminInvoice: function (p, token) { requireAdmin_(token); return adminInvoice_(p); },
+  adminReminder: function (p, token) { requireAdmin_(token); return adminReminder_(p); }
 };
 
 /* ------------------------------------------------------------------ sheet helpers */
@@ -777,8 +782,8 @@ function adminInvoice_(p) {
     if (!b.email) throw new Error('Booking ini tidak punya email klien.');
     MailApp.sendEmail({
       to: b.email,
-      subject: 'Invoice ' + inv.number + ' – Mookiland Birthday',
-      htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(b.customer) + ',<br><br>Please find attached the latest invoice for your birthday party at Mookiland on <b>' + esc_(b.date) + '</b> (booking ' + esc_(b.id) + ').<br><br>' +
+      subject: (p.updated ? 'Updated invoice ' : 'Invoice ') + inv.number + ' – Mookiland Birthday',
+      htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">Hi ' + esc_(b.customer) + ',<br><br>' + (p.updated ? 'Your booking details have been updated. ' : '') + 'Please find attached the latest invoice for your birthday party at Mookiland on <b>' + esc_(b.date) + '</b> (booking ' + esc_(b.id) + ').<br><br>' +
         'If you have any questions, message us on WhatsApp ' + esc_(cat.whatsapp) + '.<br><br>Kind regards,<br>Mookiland Team</p>',
       name: cat.business,
       attachments: [inv.blob]
@@ -966,6 +971,192 @@ function adminCakePrice_(p) {
     try { mailed = sendCakePriceEmail_(findBooking_(b.BookingId), oldPrice, price); } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', String(b.BookingId), String(e)); }
   }
   return { result: r, mailed: mailed, detail: adminGet_(b.BookingId) };
+}
+
+// Ubah rincian invoice dari admin: jumlah anak hadir, qty/harga item, tambah/hapus item.
+// p.items = daftar lengkap item booking (menggantikan yang lama). Item lama dikenali dari itemId.
+function adminItems_(p) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  var b, changes = [];
+  try {
+    b = findBooking_(p.id);
+    var cat = catalog_();
+    var byAddon = {};
+    cat.addons.forEach(function (a) { byAddon[a.id] = a; });
+    var t = table_(TAB.ITEMS);
+    var old = t.rows.filter(function (r) { return String(r.BookingId) === String(b.BookingId); });
+    var oldById = {};
+    old.forEach(function (r) { oldById[String(r.ItemId)] = r; });
+    var list = (p.items || []).slice(0, 80);
+    if (!list.length) throw new Error('Rincian tidak boleh kosong.');
+    var keep = {};
+    var norm = list.map(function (it) {
+      var qty = Math.floor(num_(it.qty));
+      var price = Math.round(num_(it.unitPrice));
+      if (qty < 1) throw new Error('Qty minimal 1 (hapus item bila tidak dipakai).');
+      if (qty > 5000 || price < 0) throw new Error('Qty atau harga tidak valid.');
+      var o = oldById[String(it.itemId || '')];
+      if (o) {
+        keep[o.ItemId] = true;
+        return { row: o, AddOnId: String(o.AddOnId), Category: String(o.Category), Name: clean_(it.name || o.Name, 150), Qty: qty, Unit: String(o.Unit || ''), UnitPrice: price,
+          Amount: qty * price, Note: clean_(it.note === undefined ? o.Note : it.note, 200), Billing: String(o.Billing || 'INVOICE') };
+      }
+      var a = it.addOnId ? byAddon[it.addOnId] : null;
+      if (it.addOnId && !a) throw new Error('Add-on tidak tersedia: ' + it.addOnId);
+      var name = clean_(it.name || (a ? a.name : ''), 150);
+      if (!name) throw new Error('Isi nama item.');
+      return { row: null, AddOnId: a ? a.id : 'CUSTOM', Category: a ? a.category : 'Other', Name: name, Qty: qty, Unit: a ? a.unit : clean_(it.unit, 40),
+        UnitPrice: price, Amount: qty * price, Note: clean_(it.note, 200), Billing: a && a.restaurant ? 'RESTAURANT' : 'INVOICE' };
+    });
+    // hapus item yang tidak ada lagi (dari bawah ke atas)
+    old.filter(function (r) { return !keep[r.ItemId]; }).sort(function (x, y) { return y._row - x._row; }).forEach(function (r) {
+      changes.push('hapus ' + r.Name);
+      t.sh.deleteRow(r._row);
+    });
+    // baris bergeser setelah dihapus: baca ulang
+    var fresh = {};
+    table_(TAB.ITEMS).rows.forEach(function (r) { fresh[String(r.ItemId)] = r; });
+    var seq = 0;
+    table_(TAB.ITEMS).rows.forEach(function (r) { seq = Math.max(seq, parseInt(String(r.ItemId).replace(/\D/g, ''), 10) || 0); });
+    norm.forEach(function (n) {
+      if (n.row) {
+        var cur = fresh[String(n.row.ItemId)];
+        if (num_(cur.Qty) !== n.Qty || num_(cur.UnitPrice) !== n.UnitPrice || String(cur.Name) !== n.Name || String(cur.Note || '') !== n.Note) {
+          changes.push(n.Name + ': ' + num_(cur.Qty) + ' x ' + num_(cur.UnitPrice) + ' -> ' + n.Qty + ' x ' + n.UnitPrice);
+          setFields_(TAB.ITEMS, cur._row, { Name: n.Name, Qty: n.Qty, UnitPrice: n.UnitPrice, Amount: n.Amount, Note: n.Note });
+        }
+        n.ItemId = String(cur.ItemId);
+      } else {
+        seq++;
+        n.ItemId = 'IT-' + ('00000' + seq).slice(-6);
+        changes.push('tambah ' + n.Name + ' x' + n.Qty);
+        append_(TAB.ITEMS, { ItemId: n.ItemId, BookingId: b.BookingId, AddOnId: n.AddOnId, Category: n.Category, Name: n.Name, Qty: n.Qty, Unit: n.Unit,
+          UnitPrice: n.UnitPrice, Amount: n.Amount, Note: n.Note, Billing: n.Billing });
+      }
+    });
+    var billed = norm.filter(function (n) { return n.Billing !== 'RESTAURANT'; });
+    var sum = function (f) { return billed.filter(f).reduce(function (s, n) { return s + n.Amount; }, 0); };
+    var total = sum(function () { return true; });
+    var out = {
+      AddOnsTotal: sum(function (n) { return n.Category !== 'package' && n.Category !== 'venue'; }),
+      VenueFee: sum(function (n) { return n.Category === 'venue'; }),
+      BookingTotal: total, UpdatedAt: txt_(now_())
+    };
+    var pkg = norm.filter(function (n) { return n.Category === 'package'; })[0];
+    if (pkg) out.PackageUnitPrice = pkg.UnitPrice;
+    if (p.children !== undefined && p.children !== '' && p.children !== null) {
+      var kids = Math.floor(num_(p.children));
+      if (kids < 0) throw new Error('Jumlah anak tidak valid.');
+      if (kids !== num_(b.ChildrenCount)) changes.push('anak ' + num_(b.ChildrenCount) + ' -> ' + kids);
+      out.ChildrenCount = kids;
+    }
+    if (num_(b.TotalPaid) <= 0) out.DepositRequired = Math.round(total * cat.depositPercent / 100);
+    var cakeLine = norm.filter(function (n) { return n.AddOnId === cat.customCakeId || /CAKE-CUSTOM/i.test(n.AddOnId); })[0];
+    if (String(b.CakeStatus) === 'PRICE_PENDING' && cakeLine && cakeLine.row && num_(cakeLine.row.UnitPrice) !== cakeLine.UnitPrice) out.CakeStatus = 'PRICE_FINAL';
+    out.ExtraFoodBeverage = norm.filter(function (n) { return /food|beverage/i.test(n.Category); }).map(function (n) { return n.Name + ' x' + n.Qty; }).join(', ');
+    setFields_(TAB.BOOKINGS, b._row, out);
+    log_('admin', 'UPDATE_ITEMS', 'Booking', String(b.BookingId), (changes.join('; ') || 'tidak ada perubahan') + ' · total ' + total);
+  } finally {
+    lock.releaseLock();
+  }
+  var r = recompute_(b.BookingId);
+  var sent = false;
+  if (p.notify) {
+    try { sent = adminInvoice_({ id: b.BookingId, send: true, updated: true }).sent; } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', String(b.BookingId), String(e)); }
+  }
+  return { result: r, sent: sent, changes: changes, detail: adminGet_(b.BookingId) };
+}
+
+/* ------------------------------------------------------------------ reminder pembayaran */
+
+// Apa yang perlu dibayar: DP (bila belum lunas DP) atau sisa pembayaran.
+function dueInfo_(b) {
+  var total = b.total === null ? 0 : b.total;
+  var deposit = b.deposit === null ? 0 : b.deposit;
+  if (b.paid < deposit) return { kind: 'DEPOSIT', amount: deposit - b.paid, total: total };
+  if (total > b.paid) return { kind: 'BALANCE', amount: total - b.paid, total: total };
+  return { kind: 'NONE', amount: 0, total: total };
+}
+
+function reminderText_(b, cat) {
+  var due = dueInfo_(b);
+  var when = b.date + ' (' + (b.session === 'Morning' ? 'morning' : 'afternoon') + (b.time ? ' ' + b.time : '') + ')';
+  var lines = ['Hi ' + (b.customer || 'there') + ',', ''];
+  if (due.kind === 'DEPOSIT') {
+    lines.push('This is a friendly reminder about your Mookiland birthday booking ' + b.id + ' on ' + when + '.');
+    lines.push('');
+    lines.push('Deposit due: ' + rp_(due.amount) + (b.hold && b.status === 'PENDING' ? ' – please transfer before ' + b.hold.slice(0, 16) + ' so we can keep your date and area reserved.' : '.'));
+  } else {
+    lines.push('Thank you for your deposit for booking ' + b.id + ' on ' + when + '.');
+    lines.push('');
+    lines.push('Remaining balance: ' + rp_(due.amount) + ' (total ' + rp_(due.total) + '), payable on the party day or by transfer before the event.');
+  }
+  lines.push('');
+  lines.push(String(cat.bank || '').trim());
+  lines.push('');
+  lines.push('Please send the transfer receipt with your booking number to this WhatsApp number. Thank you!');
+  lines.push('');
+  lines.push('Mookiland Team');
+  return { due: due, text: lines.join('\n') };
+}
+
+function sendReminderEmail_(b, cat, actor) {
+  if (!b.email) throw new Error('Booking ini tidak punya email klien.');
+  var r = reminderText_(b, cat);
+  if (r.due.kind === 'NONE') throw new Error('Tidak ada tagihan yang belum dibayar.');
+  var inv = null;
+  try { inv = invoicePdf_(b.id); } catch (e) { inv = null; }
+  var body = esc_(r.text).replace(/\n/g, '<br>').replace('this WhatsApp number', 'WhatsApp ' + esc_(cat.whatsapp));
+  MailApp.sendEmail({
+    to: b.email,
+    subject: (r.due.kind === 'DEPOSIT' ? 'Reminder: deposit for your Mookiland birthday booking ' : 'Reminder: balance for your Mookiland birthday booking ') + b.id,
+    htmlBody: '<p style="font-family:Arial,sans-serif;font-size:14px">' + body + '</p>' + (inv ? '<p style="font-family:Arial,sans-serif;font-size:12px;color:#666">Your latest invoice is attached.</p>' : ''),
+    name: cat.business,
+    attachments: inv ? [inv.blob] : []
+  });
+  log_(actor, 'REMINDER_EMAIL', 'Booking', b.id, r.due.kind + ' ' + r.due.amount + ' to ' + b.email);
+  return r;
+}
+
+// Admin: kirim reminder lewat email, atau siapkan pesan WhatsApp (dikirim admin lewat WhatsApp sendiri).
+function adminReminder_(p) {
+  var b = bookingOut_(findBooking_(p.id));
+  var cat = catalog_();
+  if (p.channel === 'wa') {
+    var r = reminderText_(b, cat);
+    var phone = String(b.whatsapp || '').replace(/\D/g, '').replace(/^0/, '62');
+    log_('admin', 'REMINDER_WA', 'Booking', b.id, r.due.kind + ' ' + r.due.amount + (phone ? ' to +' + phone : ''));
+    return { channel: 'wa', phone: phone, text: r.text, due: r.due, url: 'https://wa.me/' + phone + '?text=' + encodeURIComponent(r.text), detail: adminGet_(b.id) };
+  }
+  var res = sendReminderEmail_(b, cat, 'admin');
+  return { channel: 'email', sent: true, to: b.email, due: res.due, detail: adminGet_(b.id) };
+}
+
+// Pemicu harian (dipasang oleh setup): email reminder DP otomatis, sekali per booking.
+function reminderJob() {
+  var s = settings_();
+  if (!bool_(s.AutoDepositReminder === undefined ? 'TRUE' : s.AutoDepositReminder) || !bool_(s.SendEmails === undefined ? 'TRUE' : s.SendEmails)) return 0;
+  var after = num_(s.ReminderAfterHours || 24) * 3600 * 1000;
+  var cat = catalog_();
+  var now = now_();
+  var sentBefore = {};
+  table_(TAB.LOG).rows.forEach(function (r) { if (String(r.Action) === 'REMINDER_EMAIL') sentBefore[String(r.EntityId)] = true; });
+  var n = 0;
+  table_(TAB.BOOKINGS).rows.forEach(function (row) {
+    var b = bookingOut_(row);
+    if (b.source === 'LEGACY_GOOGLE_FORM' || b.status !== 'PENDING' || !b.email || b.paid > 0 || !b.total || sentBefore[b.id]) return;
+    if (!b.hold || b.hold <= now) return; // masa tahan sudah habis: tindak lanjut manual
+    var created = new Date(String(b.createdAt).replace(' ', 'T') + '+08:00').getTime();
+    if (!created || Date.now() - created < after) return;
+    try { sendReminderEmail_(b, cat, 'system'); n++; } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', b.id, 'reminder: ' + e); }
+  });
+  return n;
+}
+
+function installReminderTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'reminderJob') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('reminderJob').timeBased().everyDays(1).atHour(9).inTimezone(TZ).create();
 }
 
 // Logo Mookiland Bali untuk invoice (PNG, 300 px)

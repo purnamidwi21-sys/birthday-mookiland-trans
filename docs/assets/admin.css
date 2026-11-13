@@ -61,3 +61,10 @@
 .ev-reg { background: #e4eefc; color: #1f4f8f; }
 .ev-oth { background: #eee; color: #555; }
 .b-NOT_REQUIRED { background: #e4eefc; color: #1f4f8f; }
+
+.sec-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sec-row .btn { text-transform: none; letter-spacing: 0; }
+.itemsed input.ed-qty { width: 70px; text-align: right; }
+.itemsed input.ed-price { width: 120px; text-align: right; }
+.itemsed input.ed-name { width: 100%; min-width: 160px; }
+.itemsed .tbl td { vertical-align: middle; }

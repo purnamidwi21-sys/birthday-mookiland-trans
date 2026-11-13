@@ -125,11 +125,14 @@
     if (b.notes) h += '<div class="legacy" style="background:#fff;border-color:var(--line)"><b>Catatan klien:</b> ' + esc(b.notes) + '</div>';
     h += '<div class="money"><div><span>Total</span><b>' + (b.total == null ? '—' : esc(rp(b.total))) + '</b></div><div><span>DP</span><b>' + (b.deposit == null ? '—' : esc(rp(b.deposit))) + '</b></div>' +
       '<div><span>Sudah dibayar</span><b>' + esc(rp(b.paid || 0)) + '</b></div><div><span>Sisa</span><b>' + (balance == null ? '—' : esc(rp(balance))) + '</b></div></div>';
+    h += '<div class="sec sec-row"><span>Rincian</span><button type="button" class="btn ghost sm" id="itemsEdit">✎ ' + (d.items.length ? 'Ubah rincian / jumlah anak' : 'Buat rincian invoice') + '</button></div><div id="itemsBox">';
+    if (!d.items.length) h += '<div class="muted small">Belum ada rincian item' + (b.legacy ? ' (booking lama)' : '') + '.</div>';
     if (d.items.length) {
-      h += '<div class="sec">Rincian</div><div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga</th><th class="n">Jumlah</th></tr></thead><tbody>' +
+      h += '<div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga</th><th class="n">Jumlah</th></tr></thead><tbody>' +
         d.items.map((i) => '<tr style="cursor:default' + (i.billing === 'RESTAURANT' ? ';color:var(--muted)' : '') + '"><td>' + esc(i.name) + (i.billing === 'RESTAURANT' ? ' <span class="badge b-resto">Resto</span>' : '') + (i.note ? '<div class="sub">' + esc(i.note) + '</div>' : '') + '</td><td class="n">' + i.qty + '</td><td class="n">' + esc(rp(i.unitPrice)) + '</td><td class="n">' + (i.billing === 'RESTAURANT' ? '<span title="Dibayar di restoran, tidak masuk total">(' + esc(rp(i.amount)) + ')</span>' : esc(rp(i.amount))) + '</td></tr>').join('') + '</tbody></table></div>';
       if (d.items.some((i) => i.billing === 'RESTAURANT')) h += '<div class="small muted" style="margin-top:4px">Item <b>Resto</b> = dipesan & dibayar di restoran (penjualan biasa). Hanya info, tidak masuk total, DP, atau invoice.</div>';
     }
+    h += '</div>';
     const extra = [['Menu buffet', b.menu], ['Kue', [b.cake, b.cakeDetails, b.cakeWriting && '“' + b.cakeWriting + '”'].filter(Boolean).join(' · ')], ['Dekorasi', b.decoration], ['Hiburan & lainnya', b.entertainment], ['Makanan & minuman tambahan', b.extraFood]].filter((x) => x[1]);
     if (extra.length) h += '<div class="info" style="margin-top:12px">' + extra.map((x) => kv(x[0], x[1])).join('') + '</div>';
     const cakeItem = d.items.find((i) => /CAKE-CUSTOM/i.test(i.addOnId) || (S.cat && i.addOnId === S.cat.customCakeId));
@@ -175,6 +178,15 @@
       '<button type="button" class="btn ghost sm" id="invDl">Unduh invoice (PDF)</button>' +
       '<button type="button" class="btn sm" id="invSend"' + (b.email ? '' : ' disabled title="Tidak ada email klien"') + '>Kirim invoice ke klien</button>' +
       '<span class="small muted" id="invMsg">' + (b.payment === 'PAID' ? 'Invoice akan bercap PAID.' : 'Proforma invoice dengan pembayaran terbaru.') + '</span></div>';
+    const due = dueOf(b);
+    const lastRem = d.log.filter((l) => /^REMINDER_/.test(l.action)).slice(-1)[0];
+    h += '<div class="sec">Reminder pembayaran</div>' + (due.kind === 'NONE' ? '<div class="muted small">' + (b.total == null ? 'Total tagihan belum diisi.' : 'Tidak ada tagihan yang belum dibayar.') + '</div>' :
+      '<div class="small" style="margin-bottom:6px">' + (due.kind === 'DEPOSIT' ? '<b>DP belum dibayar: ' + esc(rp(due.amount)) + '</b>' + (b.status === 'PENDING' && b.hold ? ' · masa tahan slot sampai ' + esc(b.hold.slice(0, 16)) : '') : '<b>Sisa pembayaran: ' + esc(rp(due.amount)) + '</b>') + '</div>' +
+      '<div class="actions" style="margin-top:0">' +
+      '<button type="button" class="btn sm" id="remEmail"' + (b.email ? '' : ' disabled title="Tidak ada email klien"') + '>Kirim reminder email</button>' +
+      '<button type="button" class="btn sun sm" id="remWa"' + (b.whatsapp ? '' : ' disabled title="Tidak ada nomor WhatsApp"') + '>Reminder WhatsApp</button>' +
+      '<span class="small muted" id="remMsg">' + (lastRem ? 'Terakhir: ' + esc(lastRem.at.slice(0, 16)) + ' via ' + (lastRem.action === 'REMINDER_WA' ? 'WhatsApp' : 'email') + (lastRem.actor === 'system' ? ' (otomatis)' : '') : 'Belum pernah dikirim.') + '</span></div>' +
+      (due.kind === 'DEPOSIT' && b.source !== 'LEGACY_GOOGLE_FORM' ? '<p class="small muted" style="margin:6px 0 0">Email reminder DP juga dikirim otomatis sekali (dicek tiap pagi 09:00) bila booking sudah 1 hari belum dibayar.</p>' : ''));
     h += '<div class="actions">' + (wa ? '<a class="btn sun sm" target="_blank" rel="noopener" href="' + esc(wa) + '">WhatsApp klien</a>' : '') +
       (b.status === 'PENDING' ? '<button type="button" class="btn ghost sm" data-hold="1">Perpanjang masa tahan 3 hari</button>' : '') +
       (b.status !== 'COMPLETED' ? '<button type="button" class="btn ghost sm" data-status="COMPLETED">Tandai selesai</button>' : '') +
@@ -217,6 +229,22 @@
     };
     $('#invDl').addEventListener('click', (ev) => invoice(false, ev.currentTarget));
     $('#invSend').addEventListener('click', (ev) => { if (confirm('Kirim invoice terbaru ke ' + b.email + '?')) invoice(true, ev.currentTarget); });
+    $('#itemsEdit').addEventListener('click', () => itemEditor(d, err, after));
+    if ($('#remEmail')) $('#remEmail').addEventListener('click', async (ev) => {
+      if (!confirm('Kirim email reminder pembayaran ke ' + b.email + '?')) return;
+      const btn = ev.currentTarget; btn.disabled = true; $('#remMsg').textContent = 'Mengirim…';
+      try { const r = await call('adminReminder', { id: b.id, channel: 'email' }); after(r); $('#remMsg').textContent = 'Reminder email terkirim ke ' + r.to + '.'; }
+      catch (e) { $('#remMsg').textContent = ''; err(e.message); btn.disabled = false; }
+    });
+    if ($('#remWa')) $('#remWa').addEventListener('click', async (ev) => {
+      const w = window.open('', '_blank'); // dibuka langsung supaya tidak diblokir browser
+      const btn = ev.currentTarget; btn.disabled = true; $('#remMsg').textContent = 'Menyiapkan pesan…';
+      try {
+        const r = await call('adminReminder', { id: b.id, channel: 'wa' });
+        if (w) w.location.href = r.url; else window.location.href = r.url;
+        after(r); $('#remMsg').textContent = 'Pesan WhatsApp disiapkan. Periksa lalu tekan kirim di WhatsApp.';
+      } catch (e) { if (w) w.close(); $('#remMsg').textContent = ''; err(e.message); btn.disabled = false; }
+    });
     $('#editForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
       const fields = { total: f.get('total'), deposit: f.get('deposit'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value };
@@ -240,6 +268,92 @@
       try { after(await call('adminDeletePayment', { paymentId: btn.dataset.del })); } catch (e) { err(e.message); }
     }));
   }
+  function dueOf(b) {
+    const total = b.total == null ? 0 : b.total, dep = b.deposit == null ? 0 : b.deposit, paid = b.paid || 0;
+    if (paid < dep) return { kind: 'DEPOSIT', amount: dep - paid };
+    if (total > paid) return { kind: 'BALANCE', amount: total - paid };
+    return { kind: 'NONE', amount: 0 };
+  }
+
+  // Editor rincian invoice: jumlah anak hadir, qty/harga, tambah/hapus item.
+  function itemEditor(d, err, after) {
+    const b = d.booking;
+    const minKids = (S.cat && S.cat.minChildren) || 0;
+    const depPct = (S.cat && S.cat.depositPercent) || 50;
+    let rows = d.items.map((i) => ({ itemId: i.id, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: i.billing === 'RESTAURANT' }));
+    const isPkg = (r) => r.category === 'package';
+    const box = $('#itemsBox');
+    $('#itemsEdit').classList.add('hidden');
+    const addons = (S.cat && S.cat.addons) || [];
+    const groups = {};
+    addons.forEach((a) => { (groups[a.category] = groups[a.category] || []).push(a); });
+    const opts = '<option value="">— pilih item —</option>' + Object.keys(groups).map((g) => '<optgroup label="' + esc(g) + '">' +
+      groups[g].map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + ' · ' + esc(rp(a.price)) + '</option>').join('') + '</optgroup>').join('') +
+      '<option value="__custom">Item lain (isi nama & harga manual)</option>';
+    const render = () => {
+      const billed = rows.filter((r) => !r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
+      const resto = rows.filter((r) => r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
+      const dep = b.paid > 0 ? b.deposit : Math.round(billed * depPct / 100);
+      box.innerHTML = '<div class="itemsed">' +
+        '<div class="formrow" style="margin:0 0 8px"><div class="field"><label>Jumlah anak hadir</label><input id="edKids" type="number" min="0" value="' + esc(b.children || 0) + '"></div>' +
+        '<div class="small muted" style="align-self:end;max-width:420px">' + (rows.some(isPkg) && b.category === 'BIRTHDAY_PACKAGE' ? 'Qty paket ikut jumlah anak (minimum ' + minKids + ' anak tetap ditagih).' : 'Ubah qty & harga langsung di tabel.') + '</div></div>' +
+        '<div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga (Rp)</th><th class="n">Jumlah</th><th></th></tr></thead><tbody>' +
+        rows.map((r, i) => '<tr style="cursor:default' + (r.resto ? ';color:var(--muted)' : '') + '"><td>' +
+          (r.addOnId === 'CUSTOM' || !r.itemId && !r.addOnId ? '<input class="ed-name" data-i="' + i + '" value="' + esc(r.name) + '" placeholder="Nama item">' : esc(r.name)) +
+          (r.resto ? ' <span class="badge b-resto">Resto</span>' : '') + '</td>' +
+          '<td class="n"><input class="ed-qty" data-i="' + i + '" type="number" min="1" value="' + r.qty + '"' + (isPkg(r) ? ' title="Ikut jumlah anak"' : '') + '></td>' +
+          '<td class="n"><input class="ed-price" data-i="' + i + '" type="number" min="0" step="1000" value="' + r.unitPrice + '"></td>' +
+          '<td class="n">' + (r.resto ? '(' + esc(rp(r.qty * r.unitPrice)) + ')' : esc(rp(r.qty * r.unitPrice))) + '</td>' +
+          '<td>' + (isPkg(r) ? '' : '<button type="button" class="btn danger sm ed-del" data-i="' + i + '" title="Hapus item">×</button>') + '</td></tr>').join('') +
+        '</tbody></table></div>' +
+        '<div class="formrow" style="margin-top:8px"><div class="field" style="flex:1 1 260px"><label>Tambah item</label><select id="edAdd">' + opts + '</select></div>' +
+        '<button type="button" class="btn ghost sm" id="edAddBtn">＋ Tambah</button></div>' +
+        '<div class="money" style="margin-top:10px"><div><span>Total baru</span><b>' + esc(rp(billed)) + '</b></div><div><span>DP' + (b.paid > 0 ? ' (sudah dibayar)' : ' baru') + '</span><b>' + esc(rp(dep || 0)) + '</b></div>' +
+        '<div><span>Sudah dibayar</span><b>' + esc(rp(b.paid || 0)) + '</b></div><div><span>Sisa</span><b>' + esc(rp(billed - (b.paid || 0))) + '</b></div></div>' +
+        (resto ? '<div class="small muted" style="margin-top:4px">Item Resto (' + esc(rp(resto)) + ') tidak masuk total.</div>' : '') +
+        (b.total != null && billed !== b.total ? '<div class="small" style="margin-top:4px">Total berubah dari ' + esc(rp(b.total)) + ' menjadi <b>' + esc(rp(billed)) + '</b> (' + (billed > b.total ? '+' : '−') + esc(rp(Math.abs(billed - b.total))) + ').</div>' : '') +
+        '<div class="actions"><label class="check small"><input type="checkbox" id="edNotify"' + (b.email ? ' checked' : ' disabled') + '> Kirim invoice terbaru ke klien' + (b.email ? '' : ' (tidak ada email)') + '</label>' +
+        '<button type="button" class="btn sm" id="edSave">Simpan rincian</button><button type="button" class="btn ghost sm" id="edCancel">Batal</button></div></div>';
+      const num = (v) => Math.max(0, Math.round(Number(v) || 0));
+      $('#edKids').addEventListener('change', (ev) => {
+        const k = num(ev.target.value);
+        b.children = k;
+        rows.forEach((r) => { if (isPkg(r)) r.qty = Math.max(1, r.unitPrice > 0 && b.category === 'BIRTHDAY_PACKAGE' ? Math.max(k, minKids) : k); });
+        render();
+      });
+      $$('.ed-qty', box).forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].qty = Math.max(1, num(el.value)); render(); }));
+      $$('.ed-price', box).forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].unitPrice = num(el.value); render(); }));
+      $$('.ed-name', box).forEach((el) => el.addEventListener('input', () => { rows[el.dataset.i].name = el.value; }));
+      $$('.ed-del', box).forEach((el) => el.addEventListener('click', () => { rows.splice(Number(el.dataset.i), 1); render(); }));
+      $('#edAddBtn').addEventListener('click', () => {
+        const v = $('#edAdd').value; if (!v) return;
+        if (v === '__custom') rows.push({ addOnId: 'CUSTOM', category: 'Other', name: '', qty: 1, unitPrice: 0, resto: false });
+        else {
+          const a = addons.find((x) => x.id === v);
+          const ex = rows.find((r) => r.addOnId === v && !r.itemId);
+          if (ex) ex.qty++; else rows.push({ addOnId: a.id, category: a.category, name: a.name, qty: /per kid/i.test(a.unit) ? (b.children || 1) : 1, unitPrice: a.price, resto: !!a.restaurant });
+        }
+        render();
+        if (v === '__custom') { const n = $$('.ed-name', box); n[n.length - 1].focus(); }
+      });
+      $('#edCancel').addEventListener('click', () => renderDetail(S.current));
+      $('#edSave').addEventListener('click', async (ev) => {
+        if (!rows.length) return err('Rincian tidak boleh kosong.');
+        if (rows.some((r) => r.addOnId === 'CUSTOM' && !String(r.name).trim())) return err('Isi nama untuk item manual.');
+        const btn = ev.currentTarget; btn.disabled = true;
+        try {
+          const r = await call('adminItems', { id: b.id, children: b.children, notify: $('#edNotify').checked,
+            items: rows.map((x) => x.itemId ? { itemId: x.itemId, qty: x.qty, unitPrice: x.unitPrice, name: x.name } : { addOnId: x.addOnId === 'CUSTOM' ? '' : x.addOnId, name: x.name, qty: x.qty, unitPrice: x.unitPrice }) });
+          after(r);
+          const m = document.createElement('div'); m.className = 'okbox small';
+          m.textContent = 'Rincian disimpan' + (r.changes && r.changes.length ? ' (' + r.changes.length + ' perubahan)' : '') + (r.sent ? ' dan invoice terbaru terkirim ke ' + b.email + '.' : '.');
+          $('#dlgBody').prepend(m);
+        } catch (e) { err(e.message); btn.disabled = false; }
+      });
+    };
+    render();
+  }
+
   function refreshRow() {
     const b = S.current && S.current.booking; if (!b) return;
     const i = S.list.findIndex((x) => x.id === b.id);

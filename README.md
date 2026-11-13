@@ -114,3 +114,30 @@ Untuk mengubah kategori yang dibayar di restoran, edit nilai RestaurantCategorie
   - Jika total Regular Ticket Rp 0, booking langsung **Terkonfirmasi** dengan status bayar "Tanpa tagihan". Booking seperti ini tidak punya masa tahan slot dan emailnya tidak meminta DP.
 - **Form online untuk klien** tetap hanya untuk Birthday Package.
 - **Laporan** tetap menghitung Option #2 (Birthday Package) saja.
+
+## Mengubah invoice (jumlah anak hadir, tambah item, harga)
+
+Di detail booking, bagian **Rincian**, klik **✎ Ubah rincian / jumlah anak**. Di sana admin bisa:
+
+- mengisi **Jumlah anak hadir**. Qty paket ikut menyesuaikan, dan minimum anak tetap berlaku untuk Birthday Package;
+- mengubah qty atau harga setiap item, termasuk harga cake custom;
+- menghapus item, atau menambah item dari katalog maupun item lain dengan nama dan harga manual.
+
+Total baru langsung terlihat sebelum disimpan. Setelah disimpan:
+
+- Total dihitung ulang. DP ikut dihitung ulang bila belum ada pembayaran.
+- Perubahan dicatat di Riwayat.
+- Bila dicentang, invoice terbaru (subjek "Updated invoice") dikirim ke email klien.
+
+Booking lama yang belum punya rincian bisa dibuatkan rincian dengan tombol **Buat rincian invoice**.
+
+## Reminder pembayaran (DP / sisa)
+
+Di detail booking, bagian **Reminder pembayaran**:
+
+- **Kirim reminder email:** mengirim email berisi jumlah DP (atau sisa pembayaran), batas waktu, rekening bank, dan invoice terbaru (PDF).
+- **Reminder WhatsApp:** membuka WhatsApp dengan pesan yang sudah terisi ke nomor klien. Admin memeriksa pesan lalu menekan kirim sendiri.
+
+Setiap reminder tercatat di Riwayat.
+
+**Reminder otomatis:** setiap pagi pukul 09:00, booking yang sudah 1 hari belum membayar DP dan masa tahan slotnya belum habis akan dikirimi email reminder satu kali. Pemicu harian ini dipasang oleh `setup`. Untuk mematikannya, ubah setting `AutoDepositReminder` menjadi FALSE. Jeda waktunya diatur di `ReminderAfterHours`.
