@@ -737,47 +737,111 @@ function invoiceHtml_(d, cat) {
   var cakePending = b.cakeStatus === 'PRICE_PENDING';
   var kids = d.participants.length ? d.participants.map(function (k) { return k.name + (k.age !== '' ? ' (' + k.age + ')' : ''); }).join(', ') : (b.child + (b.age ? ' (' + b.age + ')' : ''));
   var area = (cat.locations.filter(function (l) { return l.id === b.locationId; })[0] || {}).name || b.venue || b.locationId || '';
-  var cell = 'padding:6px 8px;border-bottom:1px solid #e3e8e4;';
-  var kv = function (k, v) { return v === '' || v === null || v === undefined ? '' : '<tr><td style="padding:2px 12px 2px 0;color:#5d6b62;white-space:nowrap">' + esc_(k) + '</td><td style="padding:2px 0">' + esc_(v) + '</td></tr>'; };
-  var itemRow = function (i) {
-    return '<tr><td style="' + cell + '">' + esc_(i.name) + (i.note ? '<br><span style="font-size:11px;color:#777">' + esc_(i.note) + '</span>' : '') + '</td>' +
-      '<td style="' + cell + 'text-align:right">' + i.qty + '</td><td style="' + cell + 'text-align:right">' + rp_(i.unitPrice) + '</td><td style="' + cell + 'text-align:right">' + rp_(i.amount) + '</td></tr>';
+  // ---- gaya dasar (tabel + inline style: aman untuk konversi PDF Google) ----
+  var G = '#1f5c36', GL = '#eef5f0', INK = '#1d2a22', MUT = '#6b776f', LINE = '#dfe6e1';
+  var F = 'font-family:Arial,Helvetica,sans-serif;';
+  var TB = F + 'font-size:10.5px;line-height:1.45;color:' + INK + ';'; // tabel tidak mewarisi ukuran font di konverter PDF
+  var lab = 'font-size:8.5px;letter-spacing:1px;text-transform:uppercase;color:' + MUT + ';font-weight:bold;';
+  var fmtDate = function (iso) {
+    var m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return String(iso || '');
+    return Number(m[3]) + ' ' + ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][Number(m[2]) - 1] + ' ' + m[1];
   };
-  var lines = billed.length ? billed.map(itemRow).join('') : '<tr><td style="' + cell + '">Birthday package – ' + b.children + ' children' + (b.legacy ? '<br><span style="font-size:11px;color:#777">' + esc_(b.legacy) + '</span>' : '') + '</td><td style="' + cell + 'text-align:right">1</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td><td style="' + cell + 'text-align:right">' + rp_(total) + '</td></tr>';
+  var kv = function (k, v) {
+    return v === '' || v === null || v === undefined ? '' : '<tr><td style="padding:2px 14px 2px 0;color:' + MUT + ';white-space:nowrap;vertical-align:top">' + esc_(k) + '</td><td style="padding:2px 0;vertical-align:top">' + esc_(v) + '</td></tr>';
+  };
+  var n = 0;
+  var itemRow = function (i, muted) {
+    n++;
+    var bg = n % 2 === 0 ? 'background:#f7faf8;' : '';
+    var c = 'padding:7px 8px;border-bottom:1px solid ' + LINE + ';vertical-align:top;' + bg + (muted ? 'color:' + MUT + ';' : '');
+    return '<tr><td style="' + c + 'width:22px;color:' + MUT + '">' + n + '</td>' +
+      '<td style="' + c + '">' + esc_(i.name) + (i.note ? '<div style="font-size:9px;color:' + MUT + ';margin-top:2px">' + esc_(i.note) + '</div>' : '') + '</td>' +
+      '<td style="' + c + 'text-align:center;width:44px">' + i.qty + '</td>' +
+      '<td style="' + c + 'text-align:right;width:92px;white-space:nowrap">' + rp_(i.unitPrice) + '</td>' +
+      '<td style="' + c + 'text-align:right;width:100px;white-space:nowrap">' + rp_(i.amount) + '</td></tr>';
+  };
+  var thS = 'padding:7px 8px;color:#fff;font-size:9px;letter-spacing:.8px;text-transform:uppercase;font-weight:bold;background:' + G + ';';
+  var head = '<tr><th style="' + thS + 'text-align:left">#</th><th style="' + thS + 'text-align:left">Description</th><th style="' + thS + 'text-align:center">Qty</th><th style="' + thS + 'text-align:right">Unit price</th><th style="' + thS + 'text-align:right">Amount</th></tr>';
+  var lines = billed.length ? billed.map(function (i) { return itemRow(i); }).join('') :
+    itemRow({ name: 'Birthday package – ' + b.children + ' children', note: b.legacy || '', qty: 1, unitPrice: total, amount: total });
+  var trow = function (k, v, strong, top) {
+    var st = 'padding:5px 8px;' + (strong ? 'font-weight:bold;' : 'color:' + MUT + ';') + (top ? 'border-top:1px solid ' + LINE + ';' : '');
+    return '<tr><td style="' + st + 'text-align:right">' + k + '</td><td style="' + st + 'text-align:right;white-space:nowrap;width:110px;color:' + INK + '">' + v + '</td></tr>';
+  };
   var pays = d.payments.map(function (p) {
-    return '<tr><td colspan="3" style="padding:3px 8px;text-align:right;color:#5d6b62">' + esc_(PAYMENT_LABELS[p.type] || p.type) + (p.date ? ' (' + esc_(p.date) + ')' : '') + '</td><td style="padding:3px 8px;text-align:right">' + (p.amount >= 0 ? '− ' : '+ ') + rp_(Math.abs(p.amount)) + '</td></tr>';
+    return trow(esc_(PAYMENT_LABELS[p.type] || p.type) + (p.date ? ' · ' + esc_(fmtDate(p.date)) : ''), (p.amount >= 0 ? '− ' : '+ ') + rp_(Math.abs(p.amount)));
   }).join('');
+  var status = noCharge ? ['NO PAYMENT DUE', '#1f4f8f', '#e4eefc'] : isPaid ? ['PAID', G, GL] : paid > 0 ? ['DEPOSIT RECEIVED', '#7a5600', '#fff3d6'] : ['AWAITING DEPOSIT', '#9a3412', '#fdebe2'];
+  var depositAmt = b.deposit === null ? Math.round(total * cat.depositPercent / 100) : b.deposit;
   var message = noCharge ? 'No payment is due for this booking. Every guest pays the regular entrance ticket at the gate on the party day.' :
-    isPaid ? 'This invoice has been paid in full. Thank you!' :
-    paid <= 0 ? 'To confirm your booking, please make a ' + cat.depositPercent + '% deposit of <b>' + rp_(b.deposit === null ? Math.round(total * cat.depositPercent / 100) : b.deposit) + '</b>' + (b.hold && b.status === 'PENDING' ? ' before <b>' + esc_(String(b.hold).slice(0, 16)) + '</b>' : '') + '. This deposit will be deducted from the final invoice total.' :
-    'The remaining balance of <b>' + rp_(balance) + '</b> is paid on the party day.';
-  return '<html><head><meta charset="utf-8"></head><body style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1d2a22;margin:28px">' +
-    '<table style="width:100%"><tr><td><img src="' + INVOICE_LOGO + '" alt="Mookiland Bali" style="height:72px;display:block;margin-bottom:4px"><div style="color:#5d6b62">' + esc_(s.InvoiceFooter || 'Mookiland Family Park, Bali') + '<br>WhatsApp ' + esc_(cat.whatsapp) + '</div></td>' +
-    '<td style="text-align:right;vertical-align:top"><div style="font-size:20px;font-weight:bold;letter-spacing:1px">' + (isPaid ? 'INVOICE' : 'PROFORMA INVOICE') + '</div>' +
-    '<div>No. <b>' + number + '</b><br>Date: ' + today_() + '</div>' + (isPaid ? '<div style="display:inline-block;margin-top:8px;border:3px solid #1f6b3a;color:#1f6b3a;font-size:22px;font-weight:bold;padding:2px 14px;transform:rotate(-6deg)">PAID</div>' : '') + '</td></tr></table>' +
-    '<hr style="border:0;border-top:2px solid #1f6b3a;margin:14px 0">' +
-    '<table style="width:100%"><tr><td style="vertical-align:top;width:50%"><div style="font-weight:bold;margin-bottom:4px">Bill to</div><table>' +
-    kv('Contact person', b.customer) + kv('Email', b.email) + kv('Phone', b.whatsapp) + kv('Birthday child', kids) + '</table></td>' +
-    '<td style="vertical-align:top"><div style="font-weight:bold;margin-bottom:4px">Event</div><table>' +
-    kv('Event', eventLabel_(b.category, b.eventType) || 'Birthday Package') + kv('Booking no.', b.id) + kv('Date of event', b.date) + kv('Time', b.time || b.session) + kv('Venue', area) +
-    kv('Children / adults', b.children + ' / ' + b.adults) + kv('Theme', b.theme) + '</table></td></tr></table>' +
-    '<table style="width:100%;border-collapse:collapse;margin-top:16px"><tr style="background:#e8f3ea"><th style="padding:6px 8px;text-align:left">Description</th><th style="padding:6px 8px;text-align:right">Qty</th><th style="padding:6px 8px;text-align:right">Price</th><th style="padding:6px 8px;text-align:right">Amount</th></tr>' +
-    lines +
-    '<tr><td colspan="3" style="padding:8px;text-align:right;font-weight:bold">Total' + (cakePending ? ' (estimated)' : '') + '</td><td style="padding:8px;text-align:right;font-weight:bold">' + rp_(total) + '</td></tr>' +
-    pays +
-    '<tr><td colspan="3" style="padding:6px 8px;text-align:right;font-weight:bold;border-top:1px solid #1f6b3a">Balance due</td><td style="padding:6px 8px;text-align:right;font-weight:bold;border-top:1px solid #1f6b3a">' + rp_(Math.max(0, balance)) + '</td></tr></table>' +
-    (resto.length ? '<div style="margin-top:16px;border:1px dashed #b9c4bc;padding:8px 10px;background:#fafbf9">' +
-      '<div style="font-weight:bold">At the restaurant – for information only</div>' +
-      '<div style="font-size:11px;color:#5d6b62;margin-bottom:6px">These items are ordered and paid separately at the Mookiland restaurant. They are not part of this invoice, the deposit or the balance due.</div>' +
-      '<table style="width:100%;border-collapse:collapse;color:#3c4a41">' + resto.map(itemRow).join('') +
-      '<tr><td colspan="3" style="padding:6px 8px;text-align:right">Estimated restaurant bill</td><td style="padding:6px 8px;text-align:right">' + rp_(resto.reduce(function (t, i) { return t + i.amount; }, 0)) + '</td></tr></table></div>' : '') +
-    '<p style="color:#5d6b62;font-size:11px">' + esc_(taxNote_()) + (cakePending ? ' The custom cake has a starting price; we will send an updated invoice once our cake maker confirms the final price.' : '') + '</p>' +
-    (b.menu ? '<p><b>Buffet menu:</b> ' + esc_(b.menu) + '</p>' : '') +
-    (b.cakeDetails ? '<p><b>Cake:</b> ' + esc_(b.cakeDetails) + (b.cakeWriting ? ' · Writing: “' + esc_(b.cakeWriting) + '”' : '') + '</p>' : '') +
-    (b.notes ? '<p><b>Remarks:</b> ' + esc_(b.notes) + '</p>' : '') +
-    '<p style="margin-top:14px">' + message + '</p>' +
-    (isPaid || noCharge ? '' : '<p>The payment can be made via bank transfer using the details below:<br>' + esc_(cat.bank).replace(/\n/g, '<br>') + '<br>Please send the transfer receipt with your booking number to ' + esc_(cat.whatsapp) + ' on WhatsApp.</p>') +
-    '<p style="margin-top:18px">Kind regards,<br><b>Mookiland Team</b></p></body></html>';
+    isPaid ? 'This invoice has been paid in full. Thank you for celebrating with us!' :
+    paid <= 0 ? 'To confirm your booking, please pay the ' + cat.depositPercent + '% deposit of <b>' + rp_(depositAmt) + '</b>' + (b.hold && b.status === 'PENDING' ? ' before <b>' + esc_(fmtDate(b.hold)) + ', ' + esc_(String(b.hold).slice(11, 16)) + '</b>' : '') + '. The deposit is deducted from the invoice total.' :
+    'The remaining balance of <b>' + rp_(balance) + '</b> is payable on the party day.';
+  var bankRows = String(cat.bank || '').split(/\n/).map(function (l) { return l.trim(); }).filter(String).map(function (l) {
+    var m = l.match(/^([^:]{2,30}):\s*(.+)$/);
+    return m ? kv(m[1], m[2]) : '<tr><td colspan="2" style="padding:2px 0">' + esc_(l) + '</td></tr>';
+  }).join('');
+  var box = function (title, body) {
+    return '<td style="vertical-align:top;width:50%;padding:0"><div style="' + lab + 'margin-bottom:6px">' + title + '</div>' + body + '</td>';
+  };
+  var extras = [];
+  if (b.menu) extras.push(['Kids\' buffet menu', esc_(b.menu)]);
+  if (b.cakeDetails) extras.push(['Cake', esc_(b.cakeDetails) + (b.cakeWriting ? '<br>Writing: “' + esc_(b.cakeWriting) + '”' : '')]);
+  if (b.notes) extras.push(['Remarks', esc_(b.notes)]);
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>table,td,th{font-family:Arial,Helvetica,sans-serif;font-size:10.5px}</style></head><body style="' + F + 'font-size:10.5px;line-height:1.45;color:' + INK + ';margin:32px 36px">' +
+    // header
+    '<table style="' + TB + 'width:100%;border-collapse:collapse"><tr>' +
+    '<td style="vertical-align:top"><img src="' + INVOICE_LOGO + '" alt="Mookiland Bali" style="height:64px;display:block"></td>' +
+    '<td style="vertical-align:top;text-align:right">' +
+    '<div style="font-size:22px;font-weight:bold;letter-spacing:2px;color:' + G + '">' + (isPaid ? 'INVOICE' : 'PROFORMA INVOICE') + '</div>' +
+    '<table style="' + TB + 'margin:6px 0 0 auto;border-collapse:collapse;font-size:10px">' +
+    '<tr><td style="padding:1px 10px 1px 0;color:' + MUT + ';text-align:right">Invoice no.</td><td style="padding:1px 0;text-align:right;font-weight:bold">' + number + '</td></tr>' +
+    '<tr><td style="padding:1px 10px 1px 0;color:' + MUT + ';text-align:right">Issue date</td><td style="padding:1px 0;text-align:right">' + fmtDate(today_()) + '</td></tr>' +
+    '<tr><td style="padding:1px 10px 1px 0;color:' + MUT + ';text-align:right">Event date</td><td style="padding:1px 0;text-align:right">' + esc_(fmtDate(b.date)) + '</td></tr>' +
+    '</table>' +
+    '<div style="display:inline-block;margin-top:8px;padding:3px 10px;border:1px solid ' + status[1] + ';background:' + status[2] + ';color:' + status[1] + ';font-size:9px;font-weight:bold;letter-spacing:1.2px">' + status[0] + '</div>' +
+    '</td></tr></table>' +
+    '<div style="margin-top:14px;border-top:3px solid ' + G + '"></div>' +
+    // from / bill to / event
+    '<table style="' + TB + 'width:100%;border-collapse:collapse;margin-top:16px"><tr>' +
+    box('Billed to', '<div style="font-size:12px;font-weight:bold">' + esc_(b.customer || '—') + '</div><table style="border-collapse:collapse;margin-top:3px">' + kv('Email', b.email) + kv('Phone', b.whatsapp) + kv('Birthday child', kids) + '</table>') +
+    box('Event details', '<table style="' + TB + 'border-collapse:collapse">' + kv('Event', eventLabel_(b.category, b.eventType) || 'Birthday Package') + kv('Booking no.', b.id) + kv('Date', fmtDate(b.date)) +
+      kv('Time', b.time || (b.session === 'Morning' ? 'Morning' : b.session ? 'Afternoon' : '')) + kv('Venue', area) + kv('Guests', b.children + ' children · ' + b.adults + ' adults') + kv('Theme', b.theme) + '</table>') +
+    '</tr></table>' +
+    // items
+    '<table style="' + TB + 'width:100%;border-collapse:collapse;margin-top:20px">' + head + lines + '</table>' +
+    // totals
+    '<table style="' + TB + 'width:100%;border-collapse:collapse;margin-top:6px"><tr><td style="width:45%"></td><td style="padding:0">' +
+    '<table style="' + TB + 'width:100%;border-collapse:collapse">' +
+    trow('Total' + (cakePending ? ' (estimated)' : ''), rp_(total), true) + pays +
+    '<tr><td style="padding:8px;text-align:right;font-weight:bold;color:#fff;background:' + G + '">Balance due</td><td style="padding:8px;text-align:right;font-weight:bold;color:#fff;background:' + G + ';white-space:nowrap">' + rp_(Math.max(0, balance)) + '</td></tr>' +
+    '</table></td></tr></table>' +
+    '<div style="margin-top:6px;font-size:9px;color:' + MUT + ';text-align:right">' + esc_(taxNote_()) + '</div>' +
+    (cakePending ? '<div style="margin-top:4px;font-size:9px;color:' + MUT + ';text-align:right">The custom cake shows its starting price. We will send an updated invoice once our cake maker confirms the final price.</div>' : '') +
+    // restaurant
+    (resto.length ? '<div style="margin-top:18px;' + lab + '">At the restaurant – for information only</div>' +
+      '<div style="font-size:9.5px;color:' + MUT + ';margin:2px 0 6px">Ordered and paid separately at the Mookiland restaurant; not part of this invoice, the deposit or the balance due.</div>' +
+      '<table style="' + TB + 'width:100%;border-collapse:collapse">' + (function () { n = 0; return resto.map(function (i) { return itemRow(i, true); }).join(''); })() +
+      '<tr><td colspan="4" style="padding:6px 8px;text-align:right;color:' + MUT + '">Estimated restaurant bill</td><td style="padding:6px 8px;text-align:right;color:' + MUT + ';white-space:nowrap">' + rp_(resto.reduce(function (t, i) { return t + i.amount; }, 0)) + '</td></tr></table>' : '') +
+    // event notes
+    (extras.length ? '<table style="' + TB + 'width:100%;border-collapse:collapse;margin-top:18px">' + extras.map(function (x) {
+      return '<tr><td style="padding:3px 14px 3px 0;vertical-align:top;white-space:nowrap;width:110px;' + lab + '">' + x[0] + '</td><td style="padding:3px 0;vertical-align:top">' + x[1] + '</td></tr>';
+    }).join('') + '</table>' : '') +
+    // payment
+    '<table style="' + TB + 'width:100%;border-collapse:collapse;margin-top:20px"><tr>' +
+    '<td style="vertical-align:top;padding:12px 14px;background:' + GL + ';border-left:3px solid ' + G + '">' +
+    '<div style="' + lab + 'color:' + G + ';margin-bottom:4px">Payment</div><div>' + message + '</div>' +
+    (isPaid || noCharge ? '' : '<table style="' + TB + 'border-collapse:collapse;margin-top:8px">' + bankRows + '</table>' +
+      '<div style="margin-top:8px;font-size:9.5px;color:' + MUT + '">Please send the transfer receipt with your booking number <b style="color:' + INK + '">' + esc_(b.id) + '</b> to WhatsApp ' + esc_(cat.whatsapp) + '.</div>') +
+    '</td></tr></table>' +
+    // footer
+    '<div style="margin-top:22px">Thank you for choosing Mookiland. We look forward to celebrating with you!</div>' +
+    '<div style="margin-top:2px;font-weight:bold">Mookiland Team</div>' +
+    '<div style="margin-top:26px;padding-top:8px;border-top:1px solid ' + LINE + ';font-size:8.5px;color:' + MUT + ';text-align:center">' +
+    esc_(s.InvoiceFooter || 'Mookiland Family Park, Bali') + ' · WhatsApp ' + esc_(cat.whatsapp) + ' · ' + number + '</div>' +
+    '</body></html>';
 }
 
 function invoicePdf_(id) {
