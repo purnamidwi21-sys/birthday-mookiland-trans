@@ -129,7 +129,15 @@ Total baru langsung terlihat sebelum disimpan. Setelah disimpan:
 - Perubahan dicatat di Riwayat.
 - Bila dicentang, invoice terbaru (subjek "Updated invoice") dikirim ke email klien.
 
-Booking lama yang belum punya rincian bisa dibuatkan rincian dengan tombol **Buat rincian invoice**.
+Booking lama yang belum punya rincian bisa dibuatkan rincian dengan tombol **Buat rincian invoice**. Rincian akan diisi otomatis dari data formulir lama:
+
+- **Paket:** jumlah anak × harga weekday/weekend saat ini, dengan minimum anak tetap berlaku.
+- **Area:** biaya upgrade area.
+- **Cake:** own cake, favorite cake sesuai ukurannya, atau custom cake.
+- **Dekorasi, pinata, hiburan, dan workshop:** dipakai harga yang tertulis di formulir lama bila ada. Kalau tidak tertulis, dipakai harga katalog.
+- **Diskon:** dimasukkan sebagai baris diskon.
+
+Teks yang tidak dikenali ditampilkan sebagai daftar "cek manual". Periksa hasilnya, sesuaikan bila perlu, lalu simpan.
 
 ## Reminder pembayaran (DP / sisa)
 

@@ -276,11 +276,18 @@
   }
 
   // Editor rincian invoice: jumlah anak hadir, qty/harga, tambah/hapus item.
-  function itemEditor(d, err, after) {
+  async function itemEditor(d, err, after) {
     const b = d.booking;
+    let draft = null;
+    if (!d.items.length) {
+      $('#itemsBox').innerHTML = '<div class="loading">Menyusun usulan rincian dari data booking…</div>';
+      try { draft = await call('adminDraftItems', { id: b.id }); } catch (e) { draft = { items: [], hints: [] }; err(e.message); }
+    }
     const minKids = (S.cat && S.cat.minChildren) || 0;
     const depPct = (S.cat && S.cat.depositPercent) || 50;
-    let rows = d.items.map((i) => ({ itemId: i.id, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: i.billing === 'RESTAURANT' }));
+    let rows = draft ? draft.items.map((i) => ({ type: i.type, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: !!i.resto }))
+      : d.items.map((i) => ({ itemId: i.id, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: i.billing === 'RESTAURANT' }));
+    const isFree = (r) => r.addOnId === 'CUSTOM' || (!r.itemId && !r.addOnId && !r.type);
     const isPkg = (r) => r.category === 'package';
     const box = $('#itemsBox');
     $('#itemsEdit').classList.add('hidden');
@@ -293,16 +300,19 @@
     const render = () => {
       const billed = rows.filter((r) => !r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
       const resto = rows.filter((r) => r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
-      const dep = b.paid > 0 ? b.deposit : Math.round(billed * depPct / 100);
+      const dep = b.paid > 0 && b.deposit != null ? b.deposit : Math.round(billed * depPct / 100);
       box.innerHTML = '<div class="itemsed">' +
+        (draft ? '<div class="draftnote"><b>Usulan rincian dari formulir lama.</b> Paket & area memakai harga sekarang; add-on memakai harga yang tertulis di formulir bila ada. Periksa, ubah bila perlu, lalu simpan.' +
+          (draft.hints && draft.hints.length ? '<div style="margin-top:6px"><b>Belum masuk otomatis, cek manual:</b><ul>' + draft.hints.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>' : '') + '</div>' : '') +
         '<div class="formrow" style="margin:0 0 8px"><div class="field"><label>Jumlah anak hadir</label><input id="edKids" type="number" min="0" value="' + esc(b.children || 0) + '"></div>' +
         '<div class="small muted" style="align-self:end;max-width:420px">' + (rows.some(isPkg) && b.category === 'BIRTHDAY_PACKAGE' ? 'Qty paket ikut jumlah anak (minimum ' + minKids + ' anak tetap ditagih).' : 'Ubah qty & harga langsung di tabel.') + '</div></div>' +
         '<div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga (Rp)</th><th class="n">Jumlah</th><th></th></tr></thead><tbody>' +
         rows.map((r, i) => '<tr style="cursor:default' + (r.resto ? ';color:var(--muted)' : '') + '"><td>' +
-          (r.addOnId === 'CUSTOM' || !r.itemId && !r.addOnId ? '<input class="ed-name" data-i="' + i + '" value="' + esc(r.name) + '" placeholder="Nama item">' : esc(r.name)) +
+          (isFree(r) ? '<input class="ed-name" data-i="' + i + '" value="' + esc(r.name) + '" placeholder="Nama item">' : esc(r.name)) +
+          (r.note ? '<div class="sub">' + esc(r.note) + '</div>' : '') +
           (r.resto ? ' <span class="badge b-resto">Resto</span>' : '') + '</td>' +
           '<td class="n"><input class="ed-qty" data-i="' + i + '" type="number" min="1" value="' + r.qty + '"' + (isPkg(r) ? ' title="Ikut jumlah anak"' : '') + '></td>' +
-          '<td class="n"><input class="ed-price" data-i="' + i + '" type="number" min="0" step="1000" value="' + r.unitPrice + '"></td>' +
+          '<td class="n"><input class="ed-price" data-i="' + i + '" type="number"' + (isFree(r) ? '' : ' min="0"') + ' step="1000" value="' + r.unitPrice + '"' + (isFree(r) ? ' title="Isi angka negatif untuk diskon"' : '') + '></td>' +
           '<td class="n">' + (r.resto ? '(' + esc(rp(r.qty * r.unitPrice)) + ')' : esc(rp(r.qty * r.unitPrice))) + '</td>' +
           '<td>' + (isPkg(r) ? '' : '<button type="button" class="btn danger sm ed-del" data-i="' + i + '" title="Hapus item">×</button>') + '</td></tr>').join('') +
         '</tbody></table></div>' +
@@ -322,12 +332,12 @@
         render();
       });
       $$('.ed-qty', box).forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].qty = Math.max(1, num(el.value)); render(); }));
-      $$('.ed-price', box).forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].unitPrice = num(el.value); render(); }));
+      $$('.ed-price', box).forEach((el) => el.addEventListener('change', () => { const r = rows[el.dataset.i]; r.unitPrice = isFree(r) ? Math.round(Number(el.value) || 0) : num(el.value); render(); }));
       $$('.ed-name', box).forEach((el) => el.addEventListener('input', () => { rows[el.dataset.i].name = el.value; }));
       $$('.ed-del', box).forEach((el) => el.addEventListener('click', () => { rows.splice(Number(el.dataset.i), 1); render(); }));
       $('#edAddBtn').addEventListener('click', () => {
         const v = $('#edAdd').value; if (!v) return;
-        if (v === '__custom') rows.push({ addOnId: 'CUSTOM', category: 'Other', name: '', qty: 1, unitPrice: 0, resto: false });
+        if (v === '__custom') rows.push({ addOnId: '', category: 'Other', name: '', qty: 1, unitPrice: 0, resto: false });
         else {
           const a = addons.find((x) => x.id === v);
           const ex = rows.find((r) => r.addOnId === v && !r.itemId);
@@ -337,13 +347,14 @@
         if (v === '__custom') { const n = $$('.ed-name', box); n[n.length - 1].focus(); }
       });
       $('#edCancel').addEventListener('click', () => renderDetail(S.current));
+      if (draft) $('#edNotify').checked = false; // booking lama: kirim invoice hanya bila dicentang
       $('#edSave').addEventListener('click', async (ev) => {
         if (!rows.length) return err('Rincian tidak boleh kosong.');
-        if (rows.some((r) => r.addOnId === 'CUSTOM' && !String(r.name).trim())) return err('Isi nama untuk item manual.');
+        if (rows.some((r) => isFree(r) && !String(r.name).trim())) return err('Isi nama untuk item manual.');
         const btn = ev.currentTarget; btn.disabled = true;
         try {
           const r = await call('adminItems', { id: b.id, children: b.children, notify: $('#edNotify').checked,
-            items: rows.map((x) => x.itemId ? { itemId: x.itemId, qty: x.qty, unitPrice: x.unitPrice, name: x.name } : { addOnId: x.addOnId === 'CUSTOM' ? '' : x.addOnId, name: x.name, qty: x.qty, unitPrice: x.unitPrice }) });
+            items: rows.map((x) => x.itemId ? { itemId: x.itemId, qty: x.qty, unitPrice: x.unitPrice, name: x.name } : { type: x.type, addOnId: x.addOnId === 'CUSTOM' ? '' : x.addOnId, name: x.name, qty: x.qty, unitPrice: x.unitPrice, note: x.note || '' }) });
           after(r);
           const m = document.createElement('div'); m.className = 'okbox small';
           m.textContent = 'Rincian disimpan' + (r.changes && r.changes.length ? ' (' + r.changes.length + ' perubahan)' : '') + (r.sent ? ' dan invoice terbaru terkirim ke ' + b.email + '.' : '.');

@@ -156,7 +156,8 @@ var ROUTES = {
   adminCakePrice: function (p, token) { requireAdmin_(token); return adminCakePrice_(p); },
   adminItems: function (p, token) { requireAdmin_(token); return adminItems_(p); },
   adminInvoice: function (p, token) { requireAdmin_(token); return adminInvoice_(p); },
-  adminReminder: function (p, token) { requireAdmin_(token); return adminReminder_(p); }
+  adminReminder: function (p, token) { requireAdmin_(token); return adminReminder_(p); },
+  adminDraftItems: function (p, token) { requireAdmin_(token); return adminDraftItems_(p.id); }
 };
 
 /* ------------------------------------------------------------------ sheet helpers */
@@ -995,12 +996,17 @@ function adminItems_(p) {
       var qty = Math.floor(num_(it.qty));
       var price = Math.round(num_(it.unitPrice));
       if (qty < 1) throw new Error('Qty minimal 1 (hapus item bila tidak dipakai).');
-      if (qty > 5000 || price < 0) throw new Error('Qty atau harga tidak valid.');
+      var free = !oldById[String(it.itemId || '')] && !it.addOnId && it.type !== 'package' && it.type !== 'venue';
+      if (qty > 5000 || (price < 0 && !(free || (oldById[String(it.itemId || '')] && String(oldById[String(it.itemId)].AddOnId) === 'CUSTOM')))) throw new Error('Qty atau harga tidak valid.');
       var o = oldById[String(it.itemId || '')];
       if (o) {
         keep[o.ItemId] = true;
         return { row: o, AddOnId: String(o.AddOnId), Category: String(o.Category), Name: clean_(it.name || o.Name, 150), Qty: qty, Unit: String(o.Unit || ''), UnitPrice: price,
           Amount: qty * price, Note: clean_(it.note === undefined ? o.Note : it.note, 200), Billing: String(o.Billing || 'INVOICE') };
+      }
+      if (it.type === 'package' || it.type === 'venue') {
+        return { row: null, AddOnId: clean_(it.addOnId, 40) || it.type.toUpperCase(), Category: it.type, Name: clean_(it.name, 150) || 'Package', Qty: qty,
+          Unit: it.type === 'package' ? 'per child' : 'per event', UnitPrice: price, Amount: qty * price, Note: clean_(it.note, 200), Billing: 'INVOICE' };
       }
       var a = it.addOnId ? byAddon[it.addOnId] : null;
       if (it.addOnId && !a) throw new Error('Add-on tidak tersedia: ' + it.addOnId);
@@ -1051,7 +1057,7 @@ function adminItems_(p) {
       if (kids !== num_(b.ChildrenCount)) changes.push('anak ' + num_(b.ChildrenCount) + ' -> ' + kids);
       out.ChildrenCount = kids;
     }
-    if (num_(b.TotalPaid) <= 0) out.DepositRequired = Math.round(total * cat.depositPercent / 100);
+    if (num_(b.TotalPaid) <= 0 || b.DepositRequired === '') out.DepositRequired = Math.round(total * cat.depositPercent / 100);
     var cakeLine = norm.filter(function (n) { return n.AddOnId === cat.customCakeId || /CAKE-CUSTOM/i.test(n.AddOnId); })[0];
     if (String(b.CakeStatus) === 'PRICE_PENDING' && cakeLine && cakeLine.row && num_(cakeLine.row.UnitPrice) !== cakeLine.UnitPrice) out.CakeStatus = 'PRICE_FINAL';
     out.ExtraFoodBeverage = norm.filter(function (n) { return /food|beverage/i.test(n.Category); }).map(function (n) { return n.Name + ' x' + n.Qty; }).join(', ');
@@ -1066,6 +1072,108 @@ function adminItems_(p) {
     try { sent = adminInvoice_({ id: b.BookingId, send: true, updated: true }).sent; } catch (e) { log_('system', 'EMAIL_FAILED', 'Booking', String(b.BookingId), String(e)); }
   }
   return { result: r, sent: sent, changes: changes, detail: adminGet_(b.BookingId) };
+}
+
+/* ------------------------------------------------------------------ draft rincian dari booking lama */
+
+// Kata kunci di teks Google Form lama -> add-on katalog. Urutan penting (yang lebih spesifik dulu).
+var LEGACY_RULES = [
+  [/own (birthday )?cake/i, 'CAKE-OUTSIDE'],
+  [/own pinata/i, 'BYO-PINATA'],
+  [/own animator/i, 'BYO-ANIMATOR'],
+  [/custom pinata|pinata including/i, 'ENT-PINATA'],
+  [/extra candies/i, 'ENT-PINATA-SNACK'],
+  [/non-?snack.*filler/i, 'ENT-PINATA-FILLER'],
+  [/easy mooki/i, 'DECO-EASY'],
+  [/happy mooki/i, 'DECO-HAPPY'],
+  [/super mooki/i, 'DECO-SUPER'],
+  [/mooki dream/i, 'DECO-DREAM'],
+  [/face ?painting/i, 'ENT-FACEPAINT'],
+  [/mooki fun ?time|fun time with mooki|mascot/i, 'ENT-MOOKI'],
+  [/cotton candy/i, 'ENT-COTTON'],
+  [/bubble (machine|station)/i, 'ENT-BUBBLE'],
+  [/magic show/i, 'ENT-MAGIC'],
+  [/kid'?s'? corner/i, 'ENT-KIDSCORNER'],
+  [/mc character (for )?90|mc character 90/i, 'ENT-MC90'],
+  [/mc character/i, 'ENT-MC60'],
+  [/giant bubble/i, 'SCI-BUBBLE'],
+  [/nitro/i, 'SCI-NITRO'],
+  [/tesla/i, 'SCI-TESLA'],
+  [/choco pop/i, 'WS-CHOCO'],
+  [/slime/i, 'WS-SLIME'],
+  [/art canvas/i, 'WS-ART'],
+  [/stationery/i, 'GIFT-STATIONERY'],
+  [/gift ?bag/i, 'GIFT-SNACK'],
+  [/e-?invitation/i, 'INV-CUSTOM']
+];
+
+function legacyPrice_(seg) {
+  var m = String(seg).match(/(?:IDR|Rp)\.?\s*([\d][\d.,]*\d)/i);
+  if (!m) return null;
+  var n = parseInt(m[1].replace(/[.,]/g, ''), 10);
+  return n > 0 ? n : null;
+}
+
+// Usulan rincian untuk booking yang belum punya item (booking lama): paket, area, dan add-on dari teks formulir.
+function adminDraftItems_(id) {
+  var row = findBooking_(id);
+  var b = bookingOut_(row);
+  var cat = catalog_();
+  var byId = {};
+  cat.addons.forEach(function (a) { byId[a.id] = a; });
+  var items = [], hints = [];
+  var kids = Math.max(1, b.children || 0);
+  var regular = b.category === 'BIRTHDAY_REGULAR_TICKET';
+  var q = null;
+  var qp = { date: b.date, children: kids, adults: b.adults, locationId: b.locationId, eventCategory: b.category, items: [] };
+  try { q = quote_(qp, cat, true); } catch (e) { qp.locationId = ''; try { q = quote_(qp, cat, true); } catch (e2) { q = null; } }
+  if (q) q.lines.forEach(function (l) {
+    if (l.type === 'package') items.push({ type: 'package', addOnId: l.id, category: 'package', name: l.name, qty: l.qty, unitPrice: l.unitPrice, note: l.note });
+    if (l.type === 'venue') items.push({ type: 'venue', addOnId: l.id, category: 'venue', name: l.name, qty: 1, unitPrice: num_(row.VenueFee) || l.unitPrice, note: '' });
+  });
+  if (!items.some(function (i) { return i.type === 'venue'; }) && num_(row.VenueFee) > 0) {
+    items.push({ type: 'venue', addOnId: b.locationId || 'VENUE', category: 'venue', name: (b.venue || 'Area') + ' upgrade', qty: 1, unitPrice: num_(row.VenueFee), note: '' });
+  }
+  // cake
+  var cakeTxt = [b.cake, b.cakeDetails].join(' ');
+  if (/custom/i.test(b.cake)) {
+    var cc = byId[cat.customCakeId] || byId['CAKE-CUSTOM'];
+    if (cc) items.push({ addOnId: cc.id, category: cc.category, name: cc.name, qty: 1, unitPrice: legacyPrice_(b.cakeDetails) || cc.price, note: clean_(b.cakeDetails, 200) });
+  } else if (/standard|favou?rite/i.test(b.cake) || (/\b(20|24|30)\s*cm/i.test(b.cakeDetails) && !/own/i.test(b.cake))) {
+    var size = (b.cakeDetails.match(/\b(20|24|30)\s*cm/i) || [])[1] || '20';
+    var fc = byId['CAKE-FAV-' + size];
+    if (fc) items.push({ addOnId: fc.id, category: fc.category, name: fc.name, qty: 1, unitPrice: legacyPrice_(b.cakeDetails) || fc.price, note: clean_((b.cakeDetails.split(/[;:]/)[0] || ''), 120) });
+  }
+  // add-on lainnya dari teks
+  var text = [/own/i.test(cakeTxt) ? b.cake : '', b.decoration, b.entertainment, b.extraFood].filter(String).join(' , ');
+  var hits = [];
+  LEGACY_RULES.forEach(function (r) {
+    var m = r[0].exec(text);
+    if (m && !hits.some(function (h) { return h.id === r[1]; }) && !(r[1] === 'ENT-MC60' && hits.some(function (h) { return h.id === 'ENT-MC90'; }))) hits.push({ id: r[1], at: m.index, len: m[0].length });
+  });
+  if (/gift ?bag/i.test(b.legacy) && !hits.some(function (h) { return /^GIFT/.test(h.id); })) hits.push({ id: /stationery/i.test(b.legacy) ? 'GIFT-STATIONERY' : 'GIFT-SNACK', at: text.length, len: 0 });
+  hits.sort(function (x, y) { return x.at - y.at; });
+  hits.forEach(function (h, i) {
+    var a = byId[h.id];
+    var seg = text.slice(h.at, i + 1 < hits.length ? hits[i + 1].at : h.at + 160);
+    if (!a) { hints.push(clean_(seg.replace(/[,.\s]+$/, ''), 120)); return; }
+    var price = legacyPrice_(seg);
+    var perKid = /per kid|per pax/i.test(a.unit);
+    var qty = perKid ? kids : 1;
+    var note = '';
+    if (h.id === 'ENT-PINATA-SNACK') { qty = Math.max(1, kids - 12); note = 'Cek jumlah anak tambahan'; }
+    items.push({ addOnId: a.id, category: a.category, name: a.name, qty: qty, unitPrice: price || a.price, note: note || (price && price !== a.price ? 'Harga dari formulir lama' : ''), resto: !!a.restaurant });
+  });
+  // sisa teks yang tidak dikenali -> petunjuk untuk dicek manual
+  var used = text;
+  hits.forEach(function (h) { used = used.slice(0, h.at) + Array(h.len + 1).join('#') + used.slice(h.at + h.len); });
+  used.split(/,(?=\s*[A-Z])|\.(?=\s*[A-Z])/).forEach(function (part) {
+    var t = part.replace(/\(.*?\)/g, '').trim();
+    if (t && !/#/.test(t) && t.length > 3 && !/^(na|-)$/i.test(t)) hints.push(clean_(t, 120));
+  });
+  if (b.notes) hints.push('Catatan: ' + clean_(b.notes, 200));
+  if (num_(row.Discount) > 0) items.push({ addOnId: '', category: 'Other', name: 'Discount', qty: 1, unitPrice: -num_(row.Discount), note: 'Dari formulir lama' });
+  return { items: items, hints: hints, paid: b.paid, legacyTotal: b.total };
 }
 
 /* ------------------------------------------------------------------ reminder pembayaran */
