@@ -715,7 +715,7 @@ function legacyInvoiceItems_(b) {
   try {
     return adminDraftItems_(b.id).items.map(function (i) {
       var note = /formulir lama|Cek jumlah/i.test(i.note || '') ? '' : (i.note || '');
-      return { name: i.name, qty: i.qty, unitPrice: i.unitPrice, amount: i.qty * i.unitPrice, note: note, billing: i.resto ? 'RESTAURANT' : 'INVOICE' };
+      return { name: i.name, category: i.category, qty: i.qty, unitPrice: i.unitPrice, amount: i.qty * i.unitPrice, note: note, billing: i.resto ? 'RESTAURANT' : 'INVOICE' };
     });
   } catch (e) { return []; }
 }
@@ -750,13 +750,20 @@ function invoiceHtml_(d, cat) {
   var kv = function (k, v) {
     return v === '' || v === null || v === undefined ? '' : '<tr><td style="padding:2px 14px 2px 0;color:' + MUT + ';white-space:nowrap;vertical-align:top">' + esc_(k) + '</td><td style="padding:2px 0;vertical-align:top">' + esc_(v) + '</td></tr>';
   };
+  // Keterangan jenis di depan nama item, mis. "Decoration: Easy Mooki"
+  var CAT_LABEL = { 'package': 'Package', 'venue': 'Venue', 'birthday cake': 'Cake', 'other': '' };
+  var catLabel = function (c) {
+    var k = String(c || '').trim().toLowerCase();
+    return k in CAT_LABEL ? CAT_LABEL[k] : String(c || '').trim();
+  };
   var n = 0;
   var itemRow = function (i, muted) {
+    var cl = catLabel(i.category);
     n++;
     var bg = n % 2 === 0 ? 'background:#f7faf8;' : '';
     var c = 'padding:7px 8px;border-bottom:1px solid ' + LINE + ';vertical-align:top;' + bg + (muted ? 'color:' + MUT + ';' : '');
     return '<tr><td style="' + c + 'width:22px;color:' + MUT + '">' + n + '</td>' +
-      '<td style="' + c + '">' + esc_(i.name) + (i.note ? '<div style="font-size:9px;color:' + MUT + ';margin-top:2px">' + esc_(i.note) + '</div>' : '') + '</td>' +
+      '<td style="' + c + '">' + (cl ? '<b style="color:' + (muted ? MUT : G) + '">' + esc_(cl) + ':</b> ' : '') + esc_(i.name) + (i.note ? '<div style="font-size:9px;color:' + MUT + ';margin-top:2px">' + esc_(i.note) + '</div>' : '') + '</td>' +
       '<td style="' + c + 'text-align:center;width:44px">' + i.qty + '</td>' +
       '<td style="' + c + 'text-align:right;width:92px;white-space:nowrap">' + rp_(i.unitPrice) + '</td>' +
       '<td style="' + c + 'text-align:right;width:100px;white-space:nowrap">' + rp_(i.amount) + '</td></tr>';
