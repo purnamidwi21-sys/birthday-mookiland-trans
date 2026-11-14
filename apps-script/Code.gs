@@ -83,6 +83,7 @@ function setup() {
       sh.setFrozenRows(1);
     } else {
       var h = head_(sh);
+      while (h.length && h[h.length - 1] === '') h.pop(); // kolom kosong di ujung kanan
       EXTRA_TABS[name].forEach(function (c) {
         if (h.indexOf(c) < 0) { sh.getRange(1, h.length + 1).setValue(c); h.push(c); }
       });
@@ -112,6 +113,7 @@ function setup() {
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ADMIN_PASSWORD')) props.setProperty('ADMIN_PASSWORD', 'mooki2026');
   installReminderTrigger_();
+  fillUpcomingLegacy_();
   cakeFolder_(); // membuat folder Drive untuk foto referensi cake (dan meminta izin Drive)
   log_('setup', 'SYSTEM', 'Setup', '', 'Tabs & settings checked');
   return 'Setup selesai. Password admin awal: ' + props.getProperty('ADMIN_PASSWORD') + ' (ganti lewat halaman admin).';
@@ -147,7 +149,7 @@ var ROUTES = {
   createBooking: function (p, token) { return createBooking_(p, isAdmin_(token)); },
   login: function (p) { return login_(p.password); },
   adminList: function (p, token) { requireAdmin_(token); return adminList_(p); },
-  adminGet: function (p, token) { requireAdmin_(token); return adminGet_(p.id); },
+  adminGet: function (p, token) { requireAdmin_(token); autoFillLegacy_(p.id); return adminGet_(p.id); },
   adminPay: function (p, token) { requireAdmin_(token); return adminPay_(p); },
   adminDeletePayment: function (p, token) { requireAdmin_(token); return adminDeletePayment_(p); },
   adminUpdate: function (p, token) { requireAdmin_(token); return adminUpdate_(p); },
@@ -949,6 +951,60 @@ function adminGet_(id) {
   return { booking: bookingOut_(b), items: items, payments: payments, participants: kids, log: log };
 }
 
+function itemRows_(id) {
+  try { return table_(TAB.ITEMS).rows.filter(function (r) { return String(r.BookingId) === String(id); }); } catch (e) { return []; }
+}
+
+// Total, biaya area, add-on dan DP dihitung dari rincian item (item restoran tidak dihitung).
+function syncTotals_(id) {
+  var b = findBooking_(id);
+  var billed = itemRows_(id).filter(function (r) { return String(r.Billing || 'INVOICE') !== 'RESTAURANT'; });
+  if (!billed.length) return null;
+  var sum = function (f) { return billed.filter(f).reduce(function (s, r) { return s + num_(r.Amount); }, 0); };
+  var total = sum(function () { return true; });
+  var out = {
+    BookingTotal: total,
+    AddOnsTotal: sum(function (r) { return r.Category !== 'package' && r.Category !== 'venue'; }),
+    VenueFee: sum(function (r) { return r.Category === 'venue'; })
+  };
+  if (num_(b.TotalPaid) <= 0 || b.DepositRequired === '') out.DepositRequired = Math.round(total * catalog_().depositPercent / 100);
+  setFields_(TAB.BOOKINGS, b._row, out);
+  return total;
+}
+
+// Jumlah anak berubah: qty paket ikut (minimum anak berlaku untuk Birthday Package).
+function syncPackageQty_(id, kids, category) {
+  var cat = catalog_();
+  itemRows_(id).filter(function (r) { return r.Category === 'package'; }).forEach(function (r) {
+    var price = num_(r.UnitPrice);
+    var qty = Math.max(1, category === 'BIRTHDAY_PACKAGE' && price > 0 ? Math.max(kids, cat.minChildren) : kids);
+    if (qty !== num_(r.Qty)) setFields_(TAB.ITEMS, r._row, { Qty: qty, Amount: qty * price });
+  });
+}
+
+// Booking lama tanpa rincian & tanpa total: rincian dan total dibuat otomatis dari data formulir lama.
+function autoFillLegacy_(id) {
+  try {
+    var b = findBooking_(id);
+    if (String(b.Source) !== 'LEGACY_GOOGLE_FORM' || b.BookingTotal !== '' || String(b.BookingStatus) === 'CANCELLED') return false;
+    if (itemRows_(b.BookingId).length) return false;
+    var d = adminDraftItems_(b.BookingId);
+    if (!d.items.length) return false;
+    adminItems_({ id: b.BookingId, items: d.items, auto: true });
+    return true;
+  } catch (e) { log_('system', 'AUTO_ITEMS_FAILED', 'Booking', String(id), String(e)); return false; }
+}
+
+function fillUpcomingLegacy_() {
+  var today = today_(), n = 0;
+  table_(TAB.BOOKINGS).rows.forEach(function (r) {
+    if (String(r.Source) === 'LEGACY_GOOGLE_FORM' && iso_(r.EventDate) >= today && r.BookingTotal === '' && String(r.BookingStatus) !== 'CANCELLED') {
+      if (autoFillLegacy_(String(r.BookingId))) n++;
+    }
+  });
+  return n;
+}
+
 function recompute_(id) {
   var b = findBooking_(id);
   var paid = table_(TAB.PAYMENTS).rows.filter(function (r) { return String(r.BookingId) === String(id); })
@@ -997,8 +1053,9 @@ function adminUpdate_(p) {
     if (['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED'].indexOf(f.status) < 0) throw new Error('Status tidak dikenal.');
     out.BookingStatus = f.status;
   }
-  if (f.total !== undefined) out.BookingTotal = f.total === '' || f.total === null ? '' : Math.round(num_(f.total));
-  if (f.deposit !== undefined) out.DepositRequired = f.deposit === '' || f.deposit === null ? '' : Math.round(num_(f.deposit));
+  var hasItems = itemRows_(b.BookingId).length > 0; // ada rincian: total & DP dihitung otomatis
+  if (f.total !== undefined && !hasItems) out.BookingTotal = f.total === '' || f.total === null ? '' : Math.round(num_(f.total));
+  if (f.deposit !== undefined && !hasItems) out.DepositRequired = f.deposit === '' || f.deposit === null ? '' : Math.round(num_(f.deposit));
   if (f.notes !== undefined) out.SpecialRequest = clean_(f.notes, 1000);
   if (f.children !== undefined) out.ChildrenCount = Math.floor(num_(f.children));
   if (f.adults !== undefined) out.AdultsCount = Math.floor(num_(f.adults));
@@ -1011,6 +1068,10 @@ function adminUpdate_(p) {
   }
   out.UpdatedAt = txt_(now_());
   setFields_(TAB.BOOKINGS, b._row, out);
+  if (hasItems) {
+    if (out.ChildrenCount !== undefined && out.ChildrenCount !== num_(b.ChildrenCount)) syncPackageQty_(b.BookingId, out.ChildrenCount, out.EventCategory || String(b.EventCategory || ''));
+    syncTotals_(b.BookingId);
+  }
   var r = recompute_(b.BookingId);
   log_('admin', 'UPDATE', 'Booking', String(b.BookingId), JSON.stringify(f).slice(0, 400));
   return { result: r, detail: adminGet_(b.BookingId) };
@@ -1152,11 +1213,12 @@ function adminItems_(p) {
     var cakesNew = norm.filter(isCake);
     var hasCustom = cakesNew.some(function (n) { return /CAKE-CUSTOM/i.test(n.AddOnId) || n.AddOnId === cat.customCakeId; });
     if (!hasCustom && sig(old) !== sig(norm)) {
-      out.BirthdayCake = cakesNew.length ? cakesNew.map(function (n) { return n.AddOnId === 'CAKE-OUTSIDE' ? 'Own cake' : n.Name; }).join(', ') : '';
+      out.BirthdayCake = cakesNew.length ? cakesNew.map(function (n) { return n.AddOnId === 'CAKE-OUTSIDE' ? 'Own cake' : /^CAKE-FAV/.test(n.AddOnId) ? 'Favorite cake' : n.Name; })
+        .filter(function (v, i, a) { return a.indexOf(v) === i; }).join(', ') : '';
       out.CakeDetails = cakesNew.map(function (n) { return n.Name + (n.Qty > 1 ? ' x' + n.Qty : '') + (n.Note ? ': ' + n.Note : ''); }).join('; ');
     }
     setFields_(TAB.BOOKINGS, b._row, out);
-    log_('admin', 'UPDATE_ITEMS', 'Booking', String(b.BookingId), (changes.join('; ') || 'tidak ada perubahan') + ' · total ' + total);
+    log_(p.auto ? 'system' : 'admin', p.auto ? 'AUTO_ITEMS' : 'UPDATE_ITEMS', 'Booking', String(b.BookingId), (p.auto ? 'rincian & total otomatis dari formulir lama: ' : '') + (changes.join('; ') || 'tidak ada perubahan') + ' · total ' + total);
   } finally {
     lock.releaseLock();
   }

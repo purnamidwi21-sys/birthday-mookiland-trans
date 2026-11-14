@@ -137,7 +137,7 @@
       if (d.items.some((i) => i.billing === 'RESTAURANT')) h += '<div class="small muted" style="margin-top:4px">Item <b>Resto</b> = dipesan & dibayar di restoran (penjualan biasa). Hanya info, tidak masuk total, DP, atau invoice.</div>';
     }
     h += '</div>';
-    const extra = [['Menu buffet', b.menu], ['Kue', [b.cake, b.cakeDetails, b.cakeWriting && '“' + b.cakeWriting + '”'].filter(Boolean).join(' · ')], ['Dekorasi', b.decoration], ['Hiburan & lainnya', b.entertainment], ['Makanan & minuman tambahan', b.extraFood]].filter((x) => x[1]);
+    const extra = [['Menu buffet', b.menu], ['Kue', [b.cakeDetails && b.cake && b.cakeDetails.toLowerCase().includes(b.cake.toLowerCase()) ? '' : b.cake, b.cakeDetails, b.cakeWriting && '“' + b.cakeWriting + '”'].filter(Boolean).join(' · ')], ['Dekorasi', b.decoration], ['Hiburan & lainnya', b.entertainment], ['Makanan & minuman tambahan', b.extraFood]].filter((x) => x[1]);
     if (extra.length) h += '<div class="info" style="margin-top:12px">' + extra.map((x) => kv(x[0], x[1])).join('') + '</div>';
     const cakeItem = d.items.find((i) => /CAKE-CUSTOM/i.test(i.addOnId) || (S.cat && i.addOnId === S.cat.customCakeId));
     if (b.cakeStatus || cakeItem) {
@@ -151,7 +151,7 @@
           '<button class="btn sm" type="submit">Simpan harga cake</button></form>' +
           '<p class="small muted" style="margin:6px 0 0">Total' + (b.paid > 0 ? '' : ' dan DP') + ' dihitung ulang otomatis.</p>' : '') + '</div>';
     }
-    if (b.legacy) h += '<div class="legacy">Booking dari database lama. Ringkasan: ' + esc(b.legacy) + (b.total == null ? '<br>Total tagihan belum ada: isi di bawah supaya sisa tagihan bisa dihitung.' : '') + '</div>';
+    if (b.legacy) h += '<div class="legacy">Booking dari database lama. Ringkasan: ' + esc(b.legacy) + (b.total == null ? '<br>Total tagihan belum ada: klik “Buat rincian invoice” supaya total & sisa dihitung otomatis.' : '') + '</div>';
     if (d.participants.length) h += '<div class="sec">Anak berulang tahun</div><div class="small">' + d.participants.map((p) => esc(p.name) + (p.age !== '' ? ' (' + esc(p.age) + ')' : '') + (p.notes ? ' <span class="muted">' + esc(p.notes) + '</span>' : '')).join(' · ') + '</div>';
 
     h += '<div class="sec">Pembayaran</div>';
@@ -171,11 +171,13 @@
     h += '<div class="sec">Ubah booking</div><form id="editForm" class="formrow">' +
       '<div class="field"><label>Jenis event</label><select name="category">' + (evOpts.includes(b.category) ? '' : '<option value="" selected>' + esc(EV[b.category] || b.category || '—') + '</option>') +
       evOpts.map((c) => '<option value="' + c + '"' + (b.category === c ? ' selected' : '') + '>' + EV[c] + '</option>').join('') + '</select></div>' +
+      (d.items.length ? '' :
       '<div class="field"><label>Total tagihan (Rp)</label><input name="total" type="number" step="1000" value="' + (b.total == null ? '' : esc(b.total)) + '"></div>' +
-      '<div class="field"><label>DP (Rp)</label><input name="deposit" type="number" step="1000" value="' + (b.deposit == null ? '' : esc(b.deposit)) + '"></div>' +
+      '<div class="field"><label>DP (Rp)</label><input name="deposit" type="number" step="1000" value="' + (b.deposit == null ? '' : esc(b.deposit)) + '"></div>') +
       '<div class="field"><label>Jumlah anak</label><input name="children" type="number" min="0" value="' + esc(b.children || '') + '"></div>' +
       '<div class="field"><label>Jumlah dewasa</label><input name="adults" type="number" min="0" value="' + esc(b.adults || '') + '"></div>' +
       '<button class="btn ghost sm" type="submit">Simpan</button></form>' +
+      (d.items.length ? '<div class="small muted" style="margin-top:4px">Total & DP dihitung otomatis dari rincian. Mengubah jumlah anak di sini juga menyesuaikan qty paket.</div>' : '') +
       '<div class="field" style="margin-top:8px"><label>Catatan / permintaan khusus</label><textarea id="editNotes" rows="2">' + esc(b.notes) + '</textarea></div>';
 
     h += '<div class="sec">Invoice</div><div class="actions" style="margin-top:0">' +
@@ -252,7 +254,8 @@
     });
     $('#editForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
-      const fields = { total: f.get('total'), deposit: f.get('deposit'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value };
+      const fields = { children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value };
+      if (f.has('total')) { fields.total = f.get('total'); fields.deposit = f.get('deposit'); }
       if (f.get('category') && f.get('category') !== b.category) {
         if (!confirm('Ubah jenis event menjadi ' + EV[f.get('category')] + '? Total tagihan tidak dihitung ulang otomatis; sesuaikan Total & DP bila perlu.')) return;
         fields.category = f.get('category');
