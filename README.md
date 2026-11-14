@@ -147,3 +147,12 @@ Di detail booking, bagian **Reminder pembayaran**:
 Setiap reminder tercatat di Riwayat.
 
 **Reminder otomatis:** setiap pagi pukul 09:00, booking yang sudah 1 hari belum membayar DP dan masa tahan slotnya belum habis akan dikirimi email reminder satu kali. Pemicu harian ini dipasang oleh `setup`. Untuk mematikannya, ubah setting `AutoDepositReminder` menjadi FALSE. Jeda waktunya diatur di `ReminderAfterHours`.
+
+## Anak no-show (dibooking tapi tidak datang)
+
+Di **✎ Ubah rincian** dan **Ubah booking** ada dua kolom: **Jumlah anak booking** dan **Jumlah anak hadir**. Keduanya bisa diubah kapan saja, termasuk di hari H.
+
+- **Paket:** ditagih penuh untuk anak yang hadir, minimal 10 anak.
+- **No-show:** anak booking yang tidak hadir, di atas jumlah yang sudah ditagih penuh, ditagih **50%** dari harga paket. Baris "No-show children (50%)" ditambahkan otomatis ke rincian dan invoice.
+  - Contoh: booking 12, hadir 6 → 10 anak ditagih penuh dan 2 anak no-show ditagih 50%.
+- **Persentase:** diatur di setting `NoShowPercent`. Isi 0 untuk tidak menagih no-show.

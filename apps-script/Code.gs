@@ -26,6 +26,7 @@ var DEFAULT_SETTINGS = [
   ['BookingFormOpen', 'TRUE', 'FALSE = form booking online ditutup sementara'],
   ['InvoiceFooter', 'Mookiland Family Park, Bali', 'Baris alamat/nama usaha di bagian atas invoice'],
   ['RestaurantCategories', 'Food & Beverage, Food & Beverage (Adults)', 'Kategori add-on yang dipesan & dibayar di restoran (penjualan biasa): tampil sebagai info, tidak masuk invoice/total/DP'],
+  ['NoShowPercent', '50', 'Anak yang dibooking tapi tidak datang (di atas minimum anak) ditagih sekian % dari harga paket'],
   ['AutoDepositReminder', 'TRUE', 'TRUE = kirim email reminder DP otomatis (sekali, setiap pagi jam 09:00 dicek) untuk booking yang belum bayar DP'],
   ['ReminderAfterHours', '24', 'Reminder otomatis dikirim bila booking sudah berumur sekian jam dan masa tahan slot belum habis']
 ];
@@ -266,6 +267,7 @@ function catalog_() {
     business: String(s.BusinessName || 'Mookiland Birthday Party'),
     currency: String(s.Currency || 'IDR'),
     depositPercent: num_(s.DepositPercent || 50),
+    noShowPercent: s.NoShowPercent === undefined || s.NoShowPercent === '' ? 50 : num_(s.NoShowPercent),
     minChildren: num_(pkg.MinimumChildren || s.MinimumChildren || 10),
     weekdayPrice: num_(pkg.WeekdayPrice || s.WeekdayPackagePrice),
     weekendPrice: num_(pkg.WeekendPrice || s.WeekendPackagePrice),
@@ -751,7 +753,7 @@ function invoiceHtml_(d, cat) {
     return v === '' || v === null || v === undefined ? '' : '<tr><td style="padding:2px 14px 2px 0;color:' + MUT + ';white-space:nowrap;vertical-align:top">' + esc_(k) + '</td><td style="padding:2px 0;vertical-align:top">' + esc_(v) + '</td></tr>';
   };
   // Keterangan jenis di depan nama item, mis. "Decoration: Easy Mooki"
-  var CAT_LABEL = { 'package': 'Package', 'venue': 'Venue', 'birthday cake': 'Cake', 'other': '' };
+  var CAT_LABEL = { 'package': 'Package', 'venue': 'Venue', 'noshow': 'No-show', 'birthday cake': 'Cake', 'other': '' };
   var catLabel = function (c) {
     var k = String(c || '').trim().toLowerCase();
     return k in CAT_LABEL ? CAT_LABEL[k] : String(c || '').trim();
@@ -906,7 +908,7 @@ function bookingOut_(b) {
     id: String(b.BookingId), createdAt: stamp_(b.CreatedAt), date: iso_(b.EventDate), session: String(b.Session || ''), time: stamp_(b.EventTime),
     locationId: String(b.LocationId || ''), venue: String(b.VenueLegacy || ''), customer: String(b.CustomerName || ''), email: String(b.Email || ''),
     whatsapp: String(b.WhatsApp || '').replace(/^'/, ''), child: String(b.BirthdayChild || ''), age: String(b.BirthdayAge || ''),
-    children: num_(b.ChildrenCount), adults: num_(b.AdultsCount), total: b.BookingTotal === '' ? null : num_(b.BookingTotal),
+    children: num_(b.ChildrenCount), planned: num_(b.ChildrenPlanned) || num_(b.ChildrenCount), noShow: num_(b.NoShowChildren), adults: num_(b.AdultsCount), total: b.BookingTotal === '' ? null : num_(b.BookingTotal),
     deposit: b.DepositRequired === '' ? null : num_(b.DepositRequired), paid: num_(b.TotalPaid), status: String(b.BookingStatus || ''),
     payment: String(b.PaymentStatus || ''), hold: stamp_(b.HoldExpiresAt), source: String(b.Source || ''), category: String(b.EventCategory || ''), eventType: String(b.EventType || ''),
     theme: String(b.Theme || ''), notes: String(b.SpecialRequest || ''), cake: String(b.BirthdayCake || ''), cakeDetails: String(b.CakeDetails || ''),
@@ -972,7 +974,7 @@ function syncTotals_(id) {
   var total = sum(function () { return true; });
   var out = {
     BookingTotal: total,
-    AddOnsTotal: sum(function (r) { return r.Category !== 'package' && r.Category !== 'venue'; }),
+    AddOnsTotal: sum(function (r) { return r.Category !== 'package' && r.Category !== 'venue' && r.Category !== 'noshow'; }),
     VenueFee: sum(function (r) { return r.Category === 'venue'; })
   };
   var dep = depositFor_(b, total);
@@ -1095,6 +1097,7 @@ function adminUpdate_(p) {
   if (f.deposit !== undefined && !hasItems) out.DepositRequired = f.deposit === '' || f.deposit === null ? '' : Math.round(num_(f.deposit));
   if (f.notes !== undefined) out.SpecialRequest = clean_(f.notes, 1000);
   if (f.children !== undefined) out.ChildrenCount = Math.floor(num_(f.children));
+  if (f.planned !== undefined && f.planned !== '') out.ChildrenPlanned = Math.floor(num_(f.planned));
   if (f.adults !== undefined) out.AdultsCount = Math.floor(num_(f.adults));
   if (f.theme !== undefined) out.Theme = clean_(f.theme, 100);
   if (f.hold !== undefined) out.HoldExpiresAt = txt_(clean_(f.hold, 19));
@@ -1106,8 +1109,13 @@ function adminUpdate_(p) {
   out.UpdatedAt = txt_(now_());
   setFields_(TAB.BOOKINGS, b._row, out);
   if (hasItems) {
-    if (out.ChildrenCount !== undefined && out.ChildrenCount !== num_(b.ChildrenCount)) syncPackageQty_(b.BookingId, out.ChildrenCount, out.EventCategory || String(b.EventCategory || ''));
-    syncTotals_(b.BookingId);
+    var kidsChanged = out.ChildrenCount !== undefined && out.ChildrenCount !== num_(b.ChildrenCount);
+    var plannedChanged = out.ChildrenPlanned !== undefined && out.ChildrenPlanned !== (num_(b.ChildrenPlanned) || num_(b.ChildrenCount));
+    if (kidsChanged || plannedChanged || out.EventCategory) {
+      // paket & no-show dihitung ulang lewat rincian
+      adminItems_({ id: b.BookingId, children: out.ChildrenCount, planned: out.ChildrenPlanned, syncPackage: kidsChanged,
+        items: itemRows_(b.BookingId).map(function (r) { return { itemId: r.ItemId, qty: num_(r.Qty), unitPrice: num_(r.UnitPrice), name: String(r.Name), note: String(r.Note || '') }; }) });
+    } else syncTotals_(b.BookingId);
   }
   var r = recompute_(b.BookingId);
   log_('admin', 'UPDATE', 'Booking', String(b.BookingId), JSON.stringify(f).slice(0, 400));
@@ -1174,12 +1182,34 @@ function adminItems_(p) {
     old.forEach(function (r) { oldById[String(r.ItemId)] = r; });
     var list = (p.items || []).slice(0, 80);
     if (!list.length) throw new Error('Rincian tidak boleh kosong.');
+    // anak hadir (ChildrenCount) & anak booking (ChildrenPlanned)
+    var given = function (v) { return v !== undefined && v !== '' && v !== null; };
+    var kidsIn = given(p.children) ? Math.floor(num_(p.children)) : num_(b.ChildrenCount);
+    var plannedIn = given(p.planned) ? Math.floor(num_(p.planned)) : (num_(b.ChildrenPlanned) || kidsIn);
+    if (kidsIn < 0 || plannedIn < 0) throw new Error('Jumlah anak tidak valid.');
+    var evCat = String(b.EventCategory || '');
+    var catOf = function (it) { var o = oldById[String(it.itemId || '')]; return it.type || (o ? String(o.Category) : ''); };
+    if (p.syncPackage) list = list.map(function (it) { // qty paket ikut anak hadir (minimum anak berlaku)
+      if (catOf(it) !== 'package') return it;
+      var pr = Math.round(num_(it.unitPrice));
+      return Object.assign({}, it, { qty: Math.max(1, evCat === 'BIRTHDAY_PACKAGE' && pr > 0 ? Math.max(kidsIn, cat.minChildren) : kidsIn) });
+    });
+    // no-show: anak booking yang tidak hadir, di atas jumlah yang ditagih penuh, ditagih NoShowPercent dari harga paket
+    var oldNs = old.filter(function (r) { return String(r.Category) === 'noshow'; })[0];
+    list = list.filter(function (it) { return catOf(it) !== 'noshow'; });
+    var pkgIt = list.filter(function (it) { return catOf(it) === 'package'; })[0];
+    var pkgPrice = pkgIt ? Math.round(num_(pkgIt.unitPrice)) : 0;
+    var st = settings_();
+    var nsPct = num_(st.NoShowPercent === undefined || st.NoShowPercent === '' ? 50 : st.NoShowPercent);
+    var nsQty = evCat === 'BIRTHDAY_PACKAGE' && pkgPrice > 0 && nsPct > 0 ? Math.max(0, plannedIn - Math.max(kidsIn, cat.minChildren)) : 0;
+    if (nsQty > 0) list.push({ itemId: oldNs ? oldNs.ItemId : '', type: 'noshow', name: 'No-show children (' + nsPct + '% of package price)', qty: nsQty,
+      unitPrice: Math.round(pkgPrice * nsPct / 100), note: plannedIn + ' booked · ' + kidsIn + ' attended' });
     var keep = {};
     var norm = list.map(function (it) {
       var qty = Math.floor(num_(it.qty));
       var price = Math.round(num_(it.unitPrice));
       if (qty < 1) throw new Error('Qty minimal 1 (hapus item bila tidak dipakai).');
-      var free = !oldById[String(it.itemId || '')] && !it.addOnId && it.type !== 'package' && it.type !== 'venue';
+      var free = !oldById[String(it.itemId || '')] && !it.addOnId && !it.type;
       if (qty > 5000 || (price < 0 && !(free || (oldById[String(it.itemId || '')] && String(oldById[String(it.itemId)].AddOnId) === 'CUSTOM')))) throw new Error('Qty atau harga tidak valid.');
       var o = oldById[String(it.itemId || '')];
       if (o) {
@@ -1187,9 +1217,9 @@ function adminItems_(p) {
         return { row: o, AddOnId: String(o.AddOnId), Category: String(o.Category), Name: clean_(it.name || o.Name, 150), Qty: qty, Unit: String(o.Unit || ''), UnitPrice: price,
           Amount: qty * price, Note: clean_(it.note === undefined ? o.Note : it.note, 200), Billing: String(o.Billing || 'INVOICE') };
       }
-      if (it.type === 'package' || it.type === 'venue') {
+      if (it.type === 'package' || it.type === 'venue' || it.type === 'noshow') {
         return { row: null, AddOnId: clean_(it.addOnId, 40) || it.type.toUpperCase(), Category: it.type, Name: clean_(it.name, 150) || 'Package', Qty: qty,
-          Unit: it.type === 'package' ? 'per child' : 'per event', UnitPrice: price, Amount: qty * price, Note: clean_(it.note, 200), Billing: 'INVOICE' };
+          Unit: it.type === 'venue' ? 'per event' : 'per child', UnitPrice: price, Amount: qty * price, Note: clean_(it.note, 200), Billing: 'INVOICE' };
       }
       var a = it.addOnId ? byAddon[it.addOnId] : null;
       if (it.addOnId && !a) throw new Error('Add-on tidak tersedia: ' + it.addOnId);
@@ -1228,16 +1258,18 @@ function adminItems_(p) {
     var sum = function (f) { return billed.filter(f).reduce(function (s, n) { return s + n.Amount; }, 0); };
     var total = sum(function () { return true; });
     var out = {
-      AddOnsTotal: sum(function (n) { return n.Category !== 'package' && n.Category !== 'venue'; }),
+      AddOnsTotal: sum(function (n) { return n.Category !== 'package' && n.Category !== 'venue' && n.Category !== 'noshow'; }),
       VenueFee: sum(function (n) { return n.Category === 'venue'; }),
-      BookingTotal: total, UpdatedAt: txt_(now_())
+      BookingTotal: total, UpdatedAt: txt_(now_()),
+      ChildrenPlanned: plannedIn, NoShowChildren: plannedIn > kidsIn ? plannedIn - kidsIn : ''
     };
     var pkg = norm.filter(function (n) { return n.Category === 'package'; })[0];
     if (pkg) out.PackageUnitPrice = pkg.UnitPrice;
+    if (plannedIn !== (num_(b.ChildrenPlanned) || num_(b.ChildrenCount))) changes.push('anak booking ' + (num_(b.ChildrenPlanned) || num_(b.ChildrenCount)) + ' -> ' + plannedIn);
     if (p.children !== undefined && p.children !== '' && p.children !== null) {
       var kids = Math.floor(num_(p.children));
       if (kids < 0) throw new Error('Jumlah anak tidak valid.');
-      if (kids !== num_(b.ChildrenCount)) changes.push('anak ' + num_(b.ChildrenCount) + ' -> ' + kids);
+      if (kids !== num_(b.ChildrenCount)) changes.push('anak hadir ' + num_(b.ChildrenCount) + ' -> ' + kids);
       out.ChildrenCount = kids;
     }
     var dep = depositFor_(b, total, cat);

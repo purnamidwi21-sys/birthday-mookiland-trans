@@ -124,7 +124,7 @@
     const kv = (k, v) => '<div><span>' + esc(k) + '</span>' + esc(v || '—') + '</div>';
     let h = '<div class="info">' + kv('Jenis event', EV[b.category] || b.eventType || b.category) + kv('Tanggal', dateLabel(b.date, 'id')) + kv('Sesi / jam', (SES[b.session] || b.session) + ' ' + b.time) + kv('Area', loc ? loc.name : b.venue) +
       kv('Status', (ST[b.status] || b.status) + ' · ' + (PS[b.payment] || b.payment)) + kv('Klien', b.customer) + kv('WhatsApp', b.whatsapp) + kv('Email', b.email) +
-      kv('Anak berulang tahun', b.child + (b.age ? ' (' + b.age + ')' : '')) + kv('Anak / dewasa', b.children + ' / ' + (b.adults || '—')) + kv('Tema', b.theme) +
+      kv('Anak berulang tahun', b.child + (b.age ? ' (' + b.age + ')' : '')) + kv('Anak / dewasa', (b.planned && b.planned !== b.children ? b.planned + ' booking · ' + b.children + ' hadir' : b.children) + ' / ' + (b.adults || '—')) + kv('Tema', b.theme) +
       kv('Dibuat', b.createdAt + ' · ' + b.source) + kv('Masa tahan slot', b.status === 'PENDING' ? b.hold : '') + '</div>';
     if (b.notes) h += '<div class="legacy" style="background:#fff;border-color:var(--line)"><b>Catatan klien:</b> ' + esc(b.notes) + '</div>';
     const depPaid = d.payments.filter((p) => p.type === 'DEPOSIT').reduce((x, p) => x + p.amount, 0);
@@ -182,7 +182,8 @@
       (d.items.length ? '' :
       '<div class="field"><label>Total tagihan (Rp)</label><input name="total" type="number" step="1000" value="' + (b.total == null ? '' : esc(b.total)) + '"></div>' +
       '<div class="field"><label>DP (Rp)</label><input name="deposit" type="number" step="1000" value="' + (b.deposit == null ? '' : esc(b.deposit)) + '"></div>') +
-      '<div class="field"><label>Jumlah anak</label><input name="children" type="number" min="0" value="' + esc(b.children || '') + '"></div>' +
+      '<div class="field"><label>Anak booking</label><input name="planned" type="number" min="0" value="' + esc(b.planned || b.children || '') + '"></div>' +
+      '<div class="field"><label>Anak hadir</label><input name="children" type="number" min="0" value="' + esc(b.children || '') + '"></div>' +
       '<div class="field"><label>Jumlah dewasa</label><input name="adults" type="number" min="0" value="' + esc(b.adults || '') + '"></div>' +
       '<button class="btn ghost sm" type="submit">Simpan</button></form>' +
       (d.items.length ? '<div class="small muted" style="margin-top:4px">Total & DP dihitung otomatis dari rincian. Mengubah jumlah anak di sini juga menyesuaikan qty paket.</div>' : '') +
@@ -264,7 +265,7 @@
     });
     $('#editForm').addEventListener('submit', async (ev) => {
       ev.preventDefault(); const f = new FormData(ev.target);
-      const fields = { children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value };
+      const fields = { planned: f.get('planned'), children: f.get('children'), adults: f.get('adults'), notes: $('#editNotes').value };
       if (f.has('total')) { fields.total = f.get('total'); fields.deposit = f.get('deposit'); }
       if (f.get('category') && f.get('category') !== b.category) {
         if (!confirm('Ubah jenis event menjadi ' + EV[f.get('category')] + '? Total tagihan tidak dihitung ulang otomatis; sesuaikan Total & DP bila perlu.')) return;
@@ -339,8 +340,17 @@
     const depPct = (S.cat && S.cat.depositPercent) || 50;
     let rows = draft ? draft.items.map((i) => ({ type: i.type, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: !!i.resto }))
       : d.items.map((i) => ({ itemId: i.id, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: i.billing === 'RESTAURANT' }));
+    rows = rows.filter((r) => r.category !== 'noshow'); // baris no-show dihitung otomatis
+    let planned = b.planned || b.children || 0;
+    const nsPct = (S.cat && S.cat.noShowPercent != null) ? S.cat.noShowPercent : 50;
     const isFree = (r) => r.addOnId === 'CUSTOM' || (!r.itemId && !r.addOnId && !r.type);
     const isPkg = (r) => r.category === 'package';
+    const noShow = () => {
+      const pk = rows.find(isPkg);
+      if (!pk || pk.unitPrice <= 0 || b.category !== 'BIRTHDAY_PACKAGE' || !nsPct) return null;
+      const qty = Math.max(0, planned - Math.max(b.children || 0, minKids));
+      return qty > 0 ? { qty, unitPrice: Math.round(pk.unitPrice * nsPct / 100) } : null;
+    };
     const box = $('#itemsBox');
     $('#itemsEdit').classList.add('hidden');
     const addons = (S.cat && S.cat.addons) || [];
@@ -350,14 +360,16 @@
       groups[g].map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + ' · ' + esc(rp(a.price)) + '</option>').join('') + '</optgroup>').join('') +
       '<option value="__custom">Item lain (isi nama & harga manual)</option>';
     const render = () => {
-      const billed = rows.filter((r) => !r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
+      const ns = noShow();
+      const billed = rows.filter((r) => !r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0) + (ns ? ns.qty * ns.unitPrice : 0);
       const resto = rows.filter((r) => r.resto).reduce((s, r) => s + r.qty * r.unitPrice, 0);
       const dep = b.paid > 0 && b.deposit != null ? b.deposit : Math.round(billed * depPct / 100);
       box.innerHTML = '<datalist id="cakeFlavours">' + ['Chocolate', 'Red Velvet', 'Vegan Chocolate', 'Lemon', 'Apple Crumble', 'Strawberry Cheesecake', 'Raspberry Cheesecake'].map((f) => '<option value="' + f + '">').join('') + '</datalist><div class="itemsed">' +
         (draft ? '<div class="draftnote"><b>Usulan rincian dari formulir lama.</b> Paket & area memakai harga sekarang; add-on memakai harga yang tertulis di formulir bila ada. Periksa, ubah bila perlu, lalu simpan.' +
           (draft.hints && draft.hints.length ? '<div style="margin-top:6px"><b>Belum masuk otomatis, cek manual:</b><ul>' + draft.hints.map((x) => '<li>' + esc(x) + '</li>').join('') + '</ul></div>' : '') + '</div>' : '') +
-        '<div class="formrow" style="margin:0 0 8px"><div class="field"><label>Jumlah anak hadir</label><input id="edKids" type="number" min="0" value="' + esc(b.children || 0) + '"></div>' +
-        '<div class="small muted" style="align-self:end;max-width:420px">' + (rows.some(isPkg) && b.category === 'BIRTHDAY_PACKAGE' ? 'Qty paket ikut jumlah anak (minimum ' + minKids + ' anak tetap ditagih).' : 'Ubah qty & harga langsung di tabel.') + '</div></div>' +
+        '<div class="formrow" style="margin:0 0 8px"><div class="field"><label>Jumlah anak booking</label><input id="edPlanned" type="number" min="0" value="' + esc(planned) + '"></div>' +
+        '<div class="field"><label>Jumlah anak hadir</label><input id="edKids" type="number" min="0" value="' + esc(b.children || 0) + '"></div>' +
+        '<div class="small muted" style="align-self:end;max-width:420px">' + (rows.some(isPkg) && b.category === 'BIRTHDAY_PACKAGE' ? 'Paket ditagih untuk anak hadir (minimum ' + minKids + ' anak). Anak booking yang tidak hadir di atas itu ditagih ' + nsPct + '% (no-show).' : 'Ubah qty & harga langsung di tabel.') + '</div></div>' +
         '<div class="tablewrap"><table class="tbl"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Harga (Rp)</th><th class="n">Jumlah</th><th></th></tr></thead><tbody>' +
         rows.map((r, i) => '<tr style="cursor:default' + (r.resto ? ';color:var(--muted)' : '') + '"><td>' +
           (isFree(r) ? '<input class="ed-name" data-i="' + i + '" value="' + esc(r.name) + '" placeholder="Nama item">' : esc(r.name)) +
@@ -367,6 +379,7 @@
           '<td class="n"><input class="ed-price" data-i="' + i + '" type="number"' + (isFree(r) ? '' : ' min="0"') + ' step="1000" value="' + r.unitPrice + '"' + (isFree(r) ? ' title="Isi angka negatif untuk diskon"' : '') + '></td>' +
           '<td class="n">' + (r.resto ? '(' + esc(rp(r.qty * r.unitPrice)) + ')' : esc(rp(r.qty * r.unitPrice))) + '</td>' +
           '<td>' + (isPkg(r) ? '' : '<button type="button" class="btn danger sm ed-del" data-i="' + i + '" title="Hapus item">×</button>') + '</td></tr>').join('') +
+        (ns ? '<tr style="cursor:default" class="ns-row"><td><b>No-show children (' + nsPct + '%)</b><div class="sub">' + planned + ' booking · ' + (b.children || 0) + ' hadir · dihitung otomatis</div></td><td class="n">' + ns.qty + '</td><td class="n">' + esc(rp(ns.unitPrice)) + '</td><td class="n">' + esc(rp(ns.qty * ns.unitPrice)) + '</td><td></td></tr>' : '') +
         '</tbody></table></div>' +
         '<div class="formrow" style="margin-top:8px"><div class="field" style="flex:1 1 260px"><label>Tambah item</label><select id="edAdd">' + opts + '</select></div>' +
         '<button type="button" class="btn ghost sm" id="edAddBtn">＋ Tambah</button></div>' +
@@ -385,6 +398,7 @@
         rows.forEach((r) => { if (isPkg(r)) r.qty = Math.max(1, r.unitPrice > 0 && b.category === 'BIRTHDAY_PACKAGE' ? Math.max(k, minKids) : k); });
         render();
       });
+      $('#edPlanned').addEventListener('change', (ev) => { planned = num(ev.target.value); render(); });
       $$('.ed-qty', box).forEach((el) => el.addEventListener('change', () => { rows[el.dataset.i].qty = Math.max(1, num(el.value)); render(); }));
       $$('.ed-price', box).forEach((el) => el.addEventListener('change', () => { const r = rows[el.dataset.i]; r.unitPrice = isFree(r) ? Math.round(Number(el.value) || 0) : num(el.value); render(); }));
       $$('.ed-name', box).forEach((el) => el.addEventListener('input', () => { rows[el.dataset.i].name = el.value; }));
@@ -409,7 +423,7 @@
         if (rows.some((r) => isFree(r) && !String(r.name).trim())) return err('Isi nama untuk item manual.');
         const btn = ev.currentTarget; btn.disabled = true;
         try {
-          const r = await call('adminItems', { id: b.id, children: b.children, notify: $('#edNotify').checked,
+          const r = await call('adminItems', { id: b.id, children: b.children, planned, notify: $('#edNotify').checked,
             items: rows.map((x) => x.itemId ? { itemId: x.itemId, qty: x.qty, unitPrice: x.unitPrice, name: x.name, note: x.note || '' } : { type: x.type, addOnId: x.addOnId === 'CUSTOM' ? '' : x.addOnId, name: x.name, qty: x.qty, unitPrice: x.unitPrice, note: x.note || '' }) });
           after(r);
           const m = document.createElement('div'); m.className = 'okbox small';
