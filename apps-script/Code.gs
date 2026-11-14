@@ -113,6 +113,7 @@ function setup() {
   var props = PropertiesService.getScriptProperties();
   if (!props.getProperty('ADMIN_PASSWORD')) props.setProperty('ADMIN_PASSWORD', 'mooki2026');
   installReminderTrigger_();
+  fixAutoLegacy_();
   fillUpcomingLegacy_();
   cakeFolder_(); // membuat folder Drive untuk foto referensi cake (dan meminta izin Drive)
   log_('setup', 'SYSTEM', 'Setup', '', 'Tabs & settings checked');
@@ -951,6 +952,15 @@ function adminGet_(id) {
   return { booking: bookingOut_(b), items: items, payments: payments, participants: kids, log: log };
 }
 
+// DP: bila klien sudah membayar DP (tercatat sebagai pembayaran DEPOSIT) dan DP belum ditetapkan, DP = yang dibayar.
+function depositFor_(b, total, cat) {
+  var dep = table_(TAB.PAYMENTS).rows.filter(function (r) { return String(r.BookingId) === String(b.BookingId) && String(r.PaymentType) === 'DEPOSIT'; })
+    .reduce(function (s, r) { return s + num_(r.Amount); }, 0);
+  if (b.DepositRequired === '' && dep > 0) return dep;
+  if (num_(b.TotalPaid) <= 0 || b.DepositRequired === '') return Math.round(total * (cat || catalog_()).depositPercent / 100);
+  return null; // tetap
+}
+
 function itemRows_(id) {
   try { return table_(TAB.ITEMS).rows.filter(function (r) { return String(r.BookingId) === String(id); }); } catch (e) { return []; }
 }
@@ -967,7 +977,8 @@ function syncTotals_(id) {
     AddOnsTotal: sum(function (r) { return r.Category !== 'package' && r.Category !== 'venue'; }),
     VenueFee: sum(function (r) { return r.Category === 'venue'; })
   };
-  if (num_(b.TotalPaid) <= 0 || b.DepositRequired === '') out.DepositRequired = Math.round(total * catalog_().depositPercent / 100);
+  var dep = depositFor_(b, total);
+  if (dep !== null) out.DepositRequired = dep;
   setFields_(TAB.BOOKINGS, b._row, out);
   return total;
 }
@@ -990,9 +1001,37 @@ function autoFillLegacy_(id) {
     if (itemRows_(b.BookingId).length) return false;
     var d = adminDraftItems_(b.BookingId);
     if (!d.items.length) return false;
+    setFields_(TAB.BOOKINGS, b._row, { DepositRequired: '' });
     adminItems_({ id: b.BookingId, items: d.items, auto: true });
     return true;
   } catch (e) { log_('system', 'AUTO_ITEMS_FAILED', 'Booking', String(id), String(e)); return false; }
+}
+
+// Perbaikan sekali jalan untuk rincian otomatis versi pertama: hapus baris "Pinata - Extra Snacks" yang ditebak
+// dari teks formulir (opsi "upon request"), dan DP = DP yang benar-benar dibayar klien.
+function fixAutoLegacy_() {
+  var logs = table_(TAB.LOG).rows;
+  var done = {}, auto = {};
+  logs.forEach(function (l) {
+    if (String(l.Action) === 'AUTO_FIX') done[String(l.EntityId)] = true;
+    if (String(l.Action) === 'AUTO_ITEMS') auto[String(l.EntityId)] = true;
+  });
+  var n = 0;
+  Object.keys(auto).forEach(function (id) {
+    if (done[id]) return;
+    try {
+      var t = table_(TAB.ITEMS);
+      var bad = t.rows.filter(function (r) { return String(r.BookingId) === id && String(r.AddOnId) === 'ENT-PINATA-SNACK' && /Cek jumlah anak tambahan/.test(String(r.Note)); });
+      bad.sort(function (x, y) { return y._row - x._row; }).forEach(function (r) { t.sh.deleteRow(r._row); });
+      var b = findBooking_(id);
+      setFields_(TAB.BOOKINGS, b._row, { DepositRequired: '' });
+      var total = syncTotals_(id);
+      recompute_(id);
+      log_('system', 'AUTO_FIX', 'Booking', id, (bad.length ? 'hapus Pinata - Extra Snacks; ' : '') + 'DP = DP yang dibayar · total ' + total);
+      n++;
+    } catch (e) { log_('system', 'AUTO_FIX_FAILED', 'Booking', id, String(e)); }
+  });
+  return n;
 }
 
 function fillUpcomingLegacy_() {
@@ -1203,7 +1242,8 @@ function adminItems_(p) {
       if (kids !== num_(b.ChildrenCount)) changes.push('anak ' + num_(b.ChildrenCount) + ' -> ' + kids);
       out.ChildrenCount = kids;
     }
-    if (num_(b.TotalPaid) <= 0 || b.DepositRequired === '') out.DepositRequired = Math.round(total * cat.depositPercent / 100);
+    var dep = depositFor_(b, total, cat);
+    if (dep !== null) out.DepositRequired = dep;
     var cakeLine = norm.filter(function (n) { return n.AddOnId === cat.customCakeId || /CAKE-CUSTOM/i.test(n.AddOnId); })[0];
     if (String(b.CakeStatus) === 'PRICE_PENDING' && cakeLine && cakeLine.row && num_(cakeLine.row.UnitPrice) !== cakeLine.UnitPrice) out.CakeStatus = 'PRICE_FINAL';
     out.ExtraFoodBeverage = norm.filter(function (n) { return /food|beverage/i.test(n.Category); }).map(function (n) { return n.Name + ' x' + n.Qty; }).join(', ');
@@ -1238,7 +1278,6 @@ var LEGACY_RULES = [
   [/own pinata/i, 'BYO-PINATA'],
   [/own animator/i, 'BYO-ANIMATOR'],
   [/custom pinata|pinata including/i, 'ENT-PINATA'],
-  [/extra candies/i, 'ENT-PINATA-SNACK'],
   [/non-?snack.*filler/i, 'ENT-PINATA-FILLER'],
   [/easy mooki/i, 'DECO-EASY'],
   [/happy mooki/i, 'DECO-HAPPY'],
@@ -1317,13 +1356,12 @@ function adminDraftItems_(id) {
     var perKid = /per kid|per pax/i.test(a.unit);
     var qty = perKid ? kids : 1;
     var note = '';
-    if (h.id === 'ENT-PINATA-SNACK') { qty = Math.max(1, kids - 12); note = 'Cek jumlah anak tambahan'; }
     items.push({ addOnId: a.id, category: a.category, name: a.name, qty: qty, unitPrice: price || a.price, note: note || (price && price !== a.price ? 'Harga dari formulir lama' : ''), resto: !!a.restaurant });
   });
   // sisa teks yang tidak dikenali -> petunjuk untuk dicek manual
   var used = text;
   hits.forEach(function (h) { used = used.slice(0, h.at) + Array(h.len + 1).join('#') + used.slice(h.at + h.len); });
-  used.split(/,(?=\s*[A-Z])|\.(?=\s*[A-Z])/).forEach(function (part) {
+  used.split(/,(?=\s*[A-Z#])|\.(?=\s*[A-Z#])/).forEach(function (part) {
     var t = part.replace(/\(.*?\)/g, '').trim();
     if (t && !/#/.test(t) && t.length > 3 && !/^(na|-)$/i.test(t)) hints.push(clean_(t, 120));
   });

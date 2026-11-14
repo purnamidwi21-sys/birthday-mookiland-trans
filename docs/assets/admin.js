@@ -151,6 +151,11 @@
           '<button class="btn sm" type="submit">Simpan harga cake</button></form>' +
           '<p class="small muted" style="margin:6px 0 0">Total' + (b.paid > 0 ? '' : ' dan DP') + ' dihitung ulang otomatis.</p>' : '') + '</div>';
     }
+    const depPaid = d.payments.filter((p) => p.type === 'DEPOSIT').reduce((x, p) => x + p.amount, 0);
+    if (b.legacy && depPaid > 0 && b.total != null && d.items.length && Math.abs(b.total - depPaid * 2) >= 1000) {
+      h += '<div class="legacy"><b>Cek total:</b> klien membayar DP ' + esc(rp(depPaid)) + ' (50% dari ' + esc(rp(depPaid * 2)) + '), sedangkan total rincian ' + esc(rp(b.total)) +
+        ' (selisih ' + esc(rp(Math.abs(b.total - depPaid * 2))) + '). Rincian booking lama dibuat otomatis dengan harga saat ini; sesuaikan harga di “Ubah rincian” bila dulu klien mendapat harga lain.</div>';
+    }
     if (b.legacy) h += '<div class="legacy">Booking dari database lama. Ringkasan: ' + esc(b.legacy) + (b.total == null ? '<br>Total tagihan belum ada: klik “Buat rincian invoice” supaya total & sisa dihitung otomatis.' : '') + '</div>';
     if (d.participants.length) h += '<div class="sec">Anak berulang tahun</div><div class="small">' + d.participants.map((p) => esc(p.name) + (p.age !== '' ? ' (' + esc(p.age) + ')' : '') + (p.notes ? ' <span class="muted">' + esc(p.notes) + '</span>' : '')).join(' · ') + '</div>';
 
