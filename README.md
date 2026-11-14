@@ -72,7 +72,6 @@ Public holidays (weekend prices) are listed in the `Holidays` tab, which should
 be filled in each year.
 
 ## Pricing rules
-- Prices include 10% tax.
 - Weekend price applies on Saturday, Sunday and public holidays.
 - Billed children = max(children, minimum number of children).
 - Total = price per child × billed children + area fee + add-ons.
