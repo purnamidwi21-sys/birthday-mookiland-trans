@@ -127,8 +127,12 @@
       kv('Anak berulang tahun', b.child + (b.age ? ' (' + b.age + ')' : '')) + kv('Anak / dewasa', b.children + ' / ' + (b.adults || '—')) + kv('Tema', b.theme) +
       kv('Dibuat', b.createdAt + ' · ' + b.source) + kv('Masa tahan slot', b.status === 'PENDING' ? b.hold : '') + '</div>';
     if (b.notes) h += '<div class="legacy" style="background:#fff;border-color:var(--line)"><b>Catatan klien:</b> ' + esc(b.notes) + '</div>';
-    h += '<div class="money"><div><span>Total</span><b>' + (b.total == null ? '—' : esc(rp(b.total))) + '</b></div><div><span>DP</span><b>' + (b.deposit == null ? '—' : esc(rp(b.deposit))) + '</b></div>' +
-      '<div><span>Sudah dibayar</span><b>' + esc(rp(b.paid || 0)) + '</b></div><div><span>Sisa</span><b>' + (balance == null ? '—' : esc(rp(balance))) + '</b></div></div>';
+    const depPaid = d.payments.filter((p) => p.type === 'DEPOSIT').reduce((x, p) => x + p.amount, 0);
+    const otherPaid = (b.paid || 0) - depPaid;
+    h += '<div class="money"><div><span>Total</span><b>' + (b.total == null ? '—' : esc(rp(b.total))) + '</b></div>' +
+      '<div><span>DP dibayar</span><b>' + (depPaid > 0 ? esc(rp(depPaid)) : '—') + '</b>' + (depPaid > 0 ? '' : '<small class="muted">belum dibayar</small>') + '</div>' +
+      (otherPaid ? '<div><span>Pembayaran lain</span><b>' + esc(rp(otherPaid)) + '</b></div>' : '') +
+      '<div><span>Sisa</span><b>' + (balance == null ? '—' : esc(rp(Math.max(0, balance)))) + '</b>' + (balance != null && balance < 0 ? '<small class="muted">lunas · lebih bayar ' + esc(rp(-balance)) + '</small>' : balance === 0 && b.total > 0 ? '<small class="muted">lunas</small>' : '') + '</div></div>';
     h += '<div class="sec sec-row"><span>Rincian</span><button type="button" class="btn ghost sm" id="itemsEdit">✎ ' + (d.items.length ? 'Ubah rincian / jumlah anak' : 'Buat rincian invoice') + '</button></div><div id="itemsBox">';
     if (!d.items.length) h += '<div class="muted small">Belum ada rincian item' + (b.legacy ? ' (booking lama)' : '') + '.</div>';
     if (d.items.length) {
@@ -151,7 +155,6 @@
           '<button class="btn sm" type="submit">Simpan harga cake</button></form>' +
           '<p class="small muted" style="margin:6px 0 0">Total' + (b.paid > 0 ? '' : ' dan DP') + ' dihitung ulang otomatis.</p>' : '') + '</div>';
     }
-    const depPaid = d.payments.filter((p) => p.type === 'DEPOSIT').reduce((x, p) => x + p.amount, 0);
     if (b.legacy && depPaid > 0 && b.total != null && d.items.length && Math.abs(b.total - depPaid * 2) >= 1000) {
       h += '<div class="legacy"><b>Cek total:</b> klien membayar DP ' + esc(rp(depPaid)) + ' (50% dari ' + esc(rp(depPaid * 2)) + '), sedangkan total rincian ' + esc(rp(b.total)) +
         ' (selisih ' + esc(rp(Math.abs(b.total - depPaid * 2))) + '). Rincian booking lama dibuat otomatis dengan harga saat ini; sesuaikan harga di “Ubah rincian” bila dulu klien mendapat harga lain.</div>';
@@ -298,6 +301,7 @@
       try { draft = await call('adminDraftItems', { id: b.id }); } catch (e) { draft = { items: [], hints: [] }; err(e.message); }
     }
     const minKids = (S.cat && S.cat.minChildren) || 0;
+    const depPaidE = d.payments.filter((p) => p.type === 'DEPOSIT').reduce((x, p) => x + p.amount, 0);
     const depPct = (S.cat && S.cat.depositPercent) || 50;
     let rows = draft ? draft.items.map((i) => ({ type: i.type, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: !!i.resto }))
       : d.items.map((i) => ({ itemId: i.id, addOnId: i.addOnId, category: i.category, name: i.name, qty: i.qty, unitPrice: i.unitPrice, note: i.note, resto: i.billing === 'RESTAURANT' }));
@@ -332,8 +336,10 @@
         '</tbody></table></div>' +
         '<div class="formrow" style="margin-top:8px"><div class="field" style="flex:1 1 260px"><label>Tambah item</label><select id="edAdd">' + opts + '</select></div>' +
         '<button type="button" class="btn ghost sm" id="edAddBtn">＋ Tambah</button></div>' +
-        '<div class="money" style="margin-top:10px"><div><span>Total baru</span><b>' + esc(rp(billed)) + '</b></div><div><span>DP' + (b.paid > 0 ? ' (sudah dibayar)' : ' baru') + '</span><b>' + esc(rp(dep || 0)) + '</b></div>' +
-        '<div><span>Sudah dibayar</span><b>' + esc(rp(b.paid || 0)) + '</b></div><div><span>Sisa</span><b>' + esc(rp(billed - (b.paid || 0))) + '</b></div></div>' +
+        '<div class="money" style="margin-top:10px"><div><span>Total baru</span><b>' + esc(rp(billed)) + '</b></div>' +
+        '<div><span>DP dibayar</span><b>' + (depPaidE > 0 ? esc(rp(depPaidE)) : '—') + '</b>' + (depPaidE > 0 ? '' : '<small class="muted">belum dibayar · DP ' + depPct + '% = ' + esc(rp(dep || 0)) + '</small>') + '</div>' +
+        ((b.paid || 0) - depPaidE ? '<div><span>Pembayaran lain</span><b>' + esc(rp((b.paid || 0) - depPaidE)) + '</b></div>' : '') +
+        '<div><span>Sisa</span><b>' + esc(rp(billed - (b.paid || 0))) + '</b></div></div>' +
         (resto ? '<div class="small muted" style="margin-top:4px">Item Resto (' + esc(rp(resto)) + ') tidak masuk total.</div>' : '') +
         (b.total != null && billed !== b.total ? '<div class="small" style="margin-top:4px">Total berubah dari ' + esc(rp(b.total)) + ' menjadi <b>' + esc(rp(billed)) + '</b> (' + (billed > b.total ? '+' : '−') + esc(rp(Math.abs(billed - b.total))) + ').</div>' : '') +
         '<div class="actions"><label class="check small"><input type="checkbox" id="edNotify"' + (b.email ? ' checked' : ' disabled') + '> Kirim invoice terbaru ke klien' + (b.email ? '' : ' (tidak ada email)') + '</label>' +
