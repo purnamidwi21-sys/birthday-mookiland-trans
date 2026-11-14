@@ -91,7 +91,6 @@ be filled in each year.
 - **After full payment:** the invoice title becomes INVOICE and it carries a PAID stamp.
 - **Updated cake price:** the email sent with a new cake price includes the updated invoice.
 - **Settings (`Settings` tab):**
-  - `InvoiceTaxNote` is the tax note. The default text is: "The birthday package is not subject to tax. Prices of extras include 10% tax."
   - `InvoiceFooter` is the line under the Mookiland name.
   - Bank details come from `BankAccount`.
 

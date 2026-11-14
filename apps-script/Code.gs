@@ -24,7 +24,6 @@ var DEFAULT_SETTINGS = [
   ['BankAccount', 'Account Holder: PT Entertainment Leisure Partner\nBank: BNI 46\nAccount Number: 1618996150\nSwift: BNINIDJADPS', 'Rekening untuk DP (tampil di email & layar sukses)'],
   ['SendEmails', 'TRUE', 'TRUE = kirim email konfirmasi ke klien & admin'],
   ['BookingFormOpen', 'TRUE', 'FALSE = form booking online ditutup sementara'],
-  ['InvoiceTaxNote', 'The birthday package is not subject to tax. Prices of extras include 10% tax.', 'Catatan pajak di invoice & email klien'],
   ['InvoiceFooter', 'Mookiland Family Park, Bali', 'Baris alamat/nama usaha di bagian atas invoice'],
   ['RestaurantCategories', 'Food & Beverage, Food & Beverage (Adults)', 'Kategori add-on yang dipesan & dibayar di restoran (penjualan biasa): tampil sebagai info, tidak masuk invoice/total/DP'],
   ['AutoDepositReminder', 'TRUE', 'TRUE = kirim email reminder DP otomatis (sekali, setiap pagi jam 09:00 dicek) untuk booking yang belum bayar DP'],
@@ -705,10 +704,8 @@ function safeInvoice_(id) {
   try { return [invoicePdf_(id).blob]; } catch (e) { log_('system', 'INVOICE_FAILED', 'Booking', String(id), String(e)); return []; }
 }
 
-function taxNote_() {
-  var s = settings_();
-  return String(s.InvoiceTaxNote || 'The birthday package is not subject to tax. Prices of extras include 10% tax.');
-}
+// Catatan pajak tidak lagi ditampilkan di invoice maupun email.
+function taxNote_() { return ''; }
 
 var PAYMENT_LABELS = { DEPOSIT: 'Deposit', SECOND_PAYMENT: '2nd payment', FINAL: 'Final payment', ADJUSTMENT: 'Adjustment', REFUND: 'Refund' };
 
@@ -795,10 +792,8 @@ function invoiceHtml_(d, cat) {
   var box = function (title, body) {
     return '<td style="vertical-align:top;width:50%;padding:0"><div style="' + lab + 'margin-bottom:6px">' + title + '</div>' + body + '</td>';
   };
-  var extras = [];
+  var extras = []; // hanya menu buffet anak
   if (b.menu) extras.push(['Kids\' buffet menu', esc_(b.menu)]);
-  if (b.cakeDetails) extras.push(['Cake', esc_(b.cakeDetails) + (b.cakeWriting ? '<br>Writing: “' + esc_(b.cakeWriting) + '”' : '')]);
-  if (b.notes) extras.push(['Remarks', esc_(b.notes)]);
 
   return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>table,td,th{font-family:Arial,Helvetica,sans-serif;font-size:10.5px}</style></head><body style="' + F + 'font-size:10.5px;line-height:1.45;color:' + INK + ';margin:32px 36px">' +
     // header
@@ -828,7 +823,6 @@ function invoiceHtml_(d, cat) {
     trow('Total' + (cakePending ? ' (estimated)' : ''), rp_(total), true) + pays +
     '<tr><td style="padding:8px;text-align:right;font-weight:bold;color:#fff;background:' + G + '">Balance due</td><td style="padding:8px;text-align:right;font-weight:bold;color:#fff;background:' + G + ';white-space:nowrap">' + rp_(Math.max(0, balance)) + '</td></tr>' +
     '</table></td></tr></table>' +
-    '<div style="margin-top:6px;font-size:9px;color:' + MUT + ';text-align:right">' + esc_(taxNote_()) + '</div>' +
     (cakePending ? '<div style="margin-top:4px;font-size:9px;color:' + MUT + ';text-align:right">The custom cake shows its starting price. We will send an updated invoice once our cake maker confirms the final price.</div>' : '') +
     // restaurant
     (resto.length ? '<div style="margin-top:18px;' + lab + '">At the restaurant – for information only</div>' +
