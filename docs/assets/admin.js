@@ -189,6 +189,7 @@
       '<div class="field" style="margin-top:8px"><label>Catatan / permintaan khusus</label><textarea id="editNotes" rows="2">' + esc(b.notes) + '</textarea></div>';
 
     h += '<div class="sec">Invoice</div><div class="actions" style="margin-top:0">' +
+      '<button type="button" class="btn sun sm" id="invView">👁 Lihat invoice</button>' +
       '<button type="button" class="btn ghost sm" id="invDl">Unduh invoice (PDF)</button>' +
       '<button type="button" class="btn sm" id="invSend"' + (b.email ? '' : ' disabled title="Tidak ada email klien"') + '>Kirim invoice ke klien</button>' +
       '<span class="small muted" id="invMsg">' + (b.payment === 'PAID' ? 'Invoice akan bercap PAID.' : 'Proforma invoice dengan pembayaran terbaru.') + '</span></div>';
@@ -243,6 +244,7 @@
       btn.disabled = !b.email && send;
     };
     $('#invDl').addEventListener('click', (ev) => invoice(false, ev.currentTarget));
+    $('#invView').addEventListener('click', () => previewInvoice(b, err, () => $('#invSend').click()));
     $('#invSend').addEventListener('click', (ev) => { if (confirm('Kirim invoice terbaru ke ' + b.email + '?')) invoice(true, ev.currentTarget); });
     $('#itemsEdit').addEventListener('click', () => itemEditor(d, err, after));
     if ($('#remEmail')) $('#remEmail').addEventListener('click', async (ev) => {
@@ -285,6 +287,38 @@
       try { after(await call('adminDeletePayment', { paymentId: btn.dataset.del })); } catch (e) { err(e.message); }
     }));
   }
+  // Preview invoice PDF di dalam halaman admin
+  let pvUrl = null;
+  const pvDlg = $('#dlgPv');
+  const pvClose = () => { pvDlg.close(); $('#pvFrame').removeAttribute('src'); $('#pvFrame').removeAttribute('srcdoc'); if (pvUrl) { URL.revokeObjectURL(pvUrl); pvUrl = null; } };
+  $('#pvClose').addEventListener('click', pvClose);
+  pvDlg.addEventListener('cancel', (e) => { e.preventDefault(); pvClose(); });
+  async function previewInvoice(b, err, sendFn) {
+    $('#pvTitle').textContent = 'Preview invoice · ' + b.id;
+    $('#pvLoad').classList.remove('hidden'); $('#pvLoad').textContent = 'Membuat invoice…';
+    $('#pvFrame').classList.add('hidden');
+    $('#pvSend').disabled = !b.email; $('#pvSend').title = b.email ? 'Kirim ke ' + b.email : 'Tidak ada email klien';
+    pvDlg.showModal();
+    try {
+      const r = await call('adminInvoice', { id: b.id, preview: true });
+      if (pvUrl) URL.revokeObjectURL(pvUrl);
+      if (r.html) { // tampilan invoice (HTML) — cepat & tampil di semua perangkat
+        pvUrl = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
+        $('#pvFrame').removeAttribute('src'); $('#pvFrame').srcdoc = r.html;
+      } else { // server versi lama: PDF
+        const bin = atob(r.pdf); const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        pvUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        $('#pvFrame').removeAttribute('srcdoc'); $('#pvFrame').src = pvUrl + '#view=FitH';
+      }
+      $('#pvTitle').textContent = 'Preview · ' + r.number;
+      $('#pvOpen').href = pvUrl;
+      $('#pvDl').onclick = () => { pvClose(); $('#invDl').click(); };
+      $('#pvSend').onclick = () => { pvClose(); sendFn(); };
+      $('#pvLoad').classList.add('hidden'); $('#pvFrame').classList.remove('hidden');
+    } catch (e) { pvClose(); err(e.message); }
+  }
+
   function dueOf(b) {
     const total = b.total == null ? 0 : b.total, dep = b.deposit == null ? 0 : b.deposit, paid = b.paid || 0;
     if (paid < dep) return { kind: 'DEPOSIT', amount: dep - paid };

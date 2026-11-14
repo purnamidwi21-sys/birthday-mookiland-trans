@@ -7,8 +7,8 @@
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/style.css?v=12">
-<link rel="stylesheet" href="assets/admin.css?v=12">
+<link rel="stylesheet" href="assets/style.css?v=14">
+<link rel="stylesheet" href="assets/admin.css?v=14">
 </head>
 <body>
 <header class="top">
@@ -66,13 +66,22 @@
   <div class="dlg-body" id="dlgBody"></div>
 </dialog>
 
+<dialog id="dlgPv" class="dlg pv-dlg">
+  <div class="dlg-head"><b id="pvTitle">Preview invoice</b>
+    <a class="btn ghost sm" id="pvOpen" target="_blank" rel="noopener">Buka di tab baru</a>
+    <button type="button" class="btn ghost sm" id="pvDl">Unduh PDF</button>
+    <button type="button" class="btn sm" id="pvSend">Kirim ke klien</button>
+    <button type="button" class="x" id="pvClose" aria-label="Tutup">×</button></div>
+  <div class="pv-body"><div class="loading" id="pvLoad">Membuat invoice…</div><iframe id="pvFrame" title="Preview invoice" sandbox="allow-same-origin"></iframe></div>
+</dialog>
+
 <dialog id="dlgSmall" class="dlg small-dlg">
   <div class="dlg-head"><b id="smTitle"></b><button type="button" class="x" id="smClose" aria-label="Tutup">×</button></div>
   <div class="dlg-body" id="smBody"></div>
 </dialog>
 
-<script src="config.js?v=12"></script>
-<script src="assets/common.js?v=12"></script>
-<script src="assets/admin.js?v=12"></script>
+<script src="config.js?v=14"></script>
+<script src="assets/common.js?v=14"></script>
+<script src="assets/admin.js?v=14"></script>
 </body>
 </html>

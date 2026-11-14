@@ -864,6 +864,10 @@ function invoicePdf_(id) {
 }
 
 function adminInvoice_(p) {
+  if (p.preview) { // preview cepat di halaman admin: HTML invoice, tanpa konversi PDF
+    var d = adminGet_(p.id);
+    return { number: 'INV-' + d.booking.id, fileName: 'Mookiland INV-' + d.booking.id + '.pdf', html: invoiceHtml_(d, catalog_()) };
+  }
   var inv = invoicePdf_(p.id);
   var sent = false;
   if (p.send) {
